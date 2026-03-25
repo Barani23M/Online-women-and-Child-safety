@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import { safePlacesAPI } from "../services/api";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import toast from "react-hot-toast";
 import { FiMap } from "react-icons/fi";
 
-// Fix leaflet default icon
+// Fix leaflet default icon (use locally bundled assets, not CDN)
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl:       "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl:     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconRetinaUrl: markerIcon2x,
+  iconUrl:       markerIcon,
+  shadowUrl:     markerShadow,
 });
 
 const TYPE_COLORS = { police_station: "#ef4444", hospital: "#3b82f6", shelter: "#22c55e", ngo: "#f59e0b" };
@@ -20,6 +24,7 @@ export default function SafeRoutes() {
   const [places, setPlaces] = useState([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [userPos, setUserPos] = useState(null);
 
   useEffect(() => {
     safePlacesAPI.get()
@@ -28,8 +33,17 @@ export default function SafeRoutes() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Get user's current location to show on map
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {}
+    );
+  }, []);
+
   const filtered = filter === "all" ? places : places.filter((p) => p.place_type === filter);
-  const center = places.length > 0 ? [places[0].latitude, places[0].longitude] : [20.5937, 78.9629];
+  const center = userPos ? [userPos.lat, userPos.lng] : places.length > 0 ? [places[0].latitude, places[0].longitude] : [20.5937, 78.9629];
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-600 border-t-transparent" /></div>;
 
@@ -55,6 +69,14 @@ export default function SafeRoutes() {
       <div className="rounded-2xl overflow-hidden shadow-lg mb-6" style={{ height: 420 }}>
         <MapContainer center={center} zoom={10} style={{ height: "100%", width: "100%" }}>
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap contributors" />
+          {userPos && (
+            <Marker position={[userPos.lat, userPos.lng]} icon={new L.Icon({
+              iconUrl: "data:image/svg+xml;base64," + btoa(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="14" fill="#ec4899" stroke="white" stroke-width="3"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`),
+              iconSize: [32, 32], iconAnchor: [16, 16], popupAnchor: [0, -16]
+            })}>
+              <Popup><strong>📍 You are here</strong></Popup>
+            </Marker>
+          )}
           {filtered.map((p) => (
             <Marker key={p.id} position={[p.latitude, p.longitude]}>
               <Popup>

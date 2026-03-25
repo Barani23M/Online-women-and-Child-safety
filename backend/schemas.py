@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
-from database import UserRole, IncidentStatus, IncidentType
+from database import UserRole, IncidentStatus, IncidentType, FamilyLinkStatus
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────
@@ -11,6 +11,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     password: str
+    role: Optional[str] = "user"  # "user" or "parent"
 
 
 class UserLogin(BaseModel):
@@ -37,6 +38,16 @@ class Token(BaseModel):
     user: UserOut
 
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class ChangePassword(BaseModel):
+    current_password: str
+    new_password: str
+
+
 # ─── Trusted Contacts ────────────────────────────────────────────────────
 
 class TrustedContactCreate(BaseModel):
@@ -59,6 +70,7 @@ class SOSCreate(BaseModel):
     longitude: Optional[float] = None
     address: Optional[str] = None
     message: Optional[str] = "EMERGENCY! I need help immediately."
+    selfie_data: Optional[str] = None   # base64 JPEG
 
 
 class SOSOut(BaseModel):
@@ -70,6 +82,8 @@ class SOSOut(BaseModel):
     message: str
     is_active: bool
     created_at: datetime
+    resolved_at: Optional[datetime] = None
+    selfie_data: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -79,12 +93,13 @@ class SOSOut(BaseModel):
 
 class IncidentCreate(BaseModel):
     incident_type: IncidentType
-    title: str
-    description: str
+    title: str = Field(min_length=3, max_length=160)
+    description: str = Field(min_length=20, max_length=5000)
     location: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     is_anonymous: bool = False
+    evidence_url: Optional[str] = None
 
 
 class IncidentUpdate(BaseModel):
@@ -98,8 +113,12 @@ class IncidentOut(BaseModel):
     title: str
     description: str
     location: Optional[str]
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     status: IncidentStatus
     is_anonymous: bool
+    admin_notes: Optional[str] = None
+    evidence_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     reporter_id: Optional[int]
@@ -108,7 +127,33 @@ class IncidentOut(BaseModel):
         from_attributes = True
 
 
+class IncidentEvidenceUploadOut(BaseModel):
+    filename: str
+    evidence_url: str
+    content_type: Optional[str] = None
+    size_bytes: int
+
+
 # ─── Helplines ───────────────────────────────────────────────────────────
+
+class HelplineCreate(BaseModel):
+    name: str
+    number: str
+    category: str
+    description: Optional[str] = None
+    available_24x7: bool = True
+    website: Optional[str] = None
+
+
+class HelplineUpdate(BaseModel):
+    name: Optional[str] = None
+    number: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
+    available_24x7: Optional[bool] = None
+    website: Optional[str] = None
+    is_active: Optional[bool] = None
+
 
 class HelplineOut(BaseModel):
     id: int
@@ -118,12 +163,31 @@ class HelplineOut(BaseModel):
     description: Optional[str]
     available_24x7: bool
     website: Optional[str]
+    is_active: bool = True
 
     class Config:
         from_attributes = True
 
 
 # ─── Legal Resources ─────────────────────────────────────────────────────
+
+class LegalResourceCreate(BaseModel):
+    title: str
+    category: str
+    law_name: Optional[str] = None
+    summary: str
+    full_text: Optional[str] = None
+    reference_url: Optional[str] = None
+
+
+class LegalResourceUpdate(BaseModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    law_name: Optional[str] = None
+    summary: Optional[str] = None
+    full_text: Optional[str] = None
+    reference_url: Optional[str] = None
+
 
 class LegalResourceOut(BaseModel):
     id: int
@@ -139,6 +203,26 @@ class LegalResourceOut(BaseModel):
 
 
 # ─── Counseling Resources ─────────────────────────────────────────────────
+
+class CounselingResourceCreate(BaseModel):
+    title: str
+    category: str
+    description: str
+    contact: Optional[str] = None
+    website: Optional[str] = None
+    location: Optional[str] = None
+    is_online: bool = False
+
+
+class CounselingResourceUpdate(BaseModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
+    contact: Optional[str] = None
+    website: Optional[str] = None
+    location: Optional[str] = None
+    is_online: Optional[bool] = None
+
 
 class CounselingResourceOut(BaseModel):
     id: int
@@ -156,15 +240,92 @@ class CounselingResourceOut(BaseModel):
 
 # ─── Safe Places ─────────────────────────────────────────────────────────
 
+class SafePlaceCreate(BaseModel):
+    name: str
+    place_type: str
+    address: str
+    city: Optional[str] = None
+    latitude: float
+    longitude: float
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    description: Optional[str] = None
+    is_verified: bool = False
+
+
+class SafePlaceUpdate(BaseModel):
+    name: Optional[str] = None
+    place_type: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    description: Optional[str] = None
+    is_verified: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
 class SafePlaceOut(BaseModel):
     id: int
     name: str
     place_type: str
     address: str
+    city: Optional[str] = None
     latitude: float
     longitude: float
     phone: Optional[str]
+    website: Optional[str] = None
+    description: Optional[str] = None
     is_verified: bool
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Notifications ────────────────────────────────────────────────────────
+
+class NotificationOut(BaseModel):
+    id: int
+    title: str
+    message: str
+    notification_type: str
+    is_read: bool
+    related_incident_id: Optional[int] = None
+    related_sos_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Child Safety Tips ────────────────────────────────────────────────────
+
+class ChildSafetyTipCreate(BaseModel):
+    title: str
+    category: str
+    content: str
+    age_group: Optional[str] = None
+
+
+class ChildSafetyTipUpdate(BaseModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    content: Optional[str] = None
+    age_group: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ChildSafetyTipOut(BaseModel):
+    id: int
+    title: str
+    category: str
+    content: str
+    age_group: Optional[str]
+    is_active: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -178,4 +339,57 @@ class DashboardStats(BaseModel):
     active_sos: int
     pending_incidents: int
     resolved_incidents: int
-    incidents_by_type: dict
+    incidents_by_type: Dict[str, int]
+
+
+# ─── Family / Guardian ────────────────────────────────────────────────────────
+
+class FamilyLinkRequest(BaseModel):
+    """Child/ward sends their parent's email to request a link."""
+    parent_email: EmailStr
+
+
+class FamilyLinkOut(BaseModel):
+    id: int
+    parent_user_id: int
+    child_user_id: int
+    status: FamilyLinkStatus
+    created_at: datetime
+    accepted_at: Optional[datetime] = None
+    parent_name: Optional[str] = None
+    parent_email: Optional[str] = None
+    child_name: Optional[str] = None
+    child_email: Optional[str] = None
+    child_phone: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class FamilyAlertCreate(BaseModel):
+    """Payload sent by frontend when SOS is triggered (auto-called)."""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    address: Optional[str] = None
+    selfie_data: Optional[str] = None          # base64 JPEG
+    message: Optional[str] = "EMERGENCY! I need help immediately."
+    sos_alert_id: Optional[int] = None
+
+
+class FamilyAlertOut(BaseModel):
+    id: int
+    child_user_id: int
+    parent_user_id: int
+    sos_alert_id: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    address: Optional[str] = None
+    selfie_data: Optional[str] = None
+    message: Optional[str] = None
+    is_read: bool
+    created_at: datetime
+    child_name: Optional[str] = None
+    child_phone: Optional[str] = None
+
+    class Config:
+        from_attributes = True

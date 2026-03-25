@@ -19,7 +19,8 @@ export default function Login() {
       const res = await authAPI.login(form);
       login(res.data.access_token, res.data.user);
       toast.success(`Welcome back, ${res.data.user.full_name}!`);
-      navigate(res.data.user.role === "admin" ? "/admin" : "/dashboard");
+      const role = res.data.user.role;
+      navigate(role === "admin" ? "/admin" : role === "parent" ? "/parent-dashboard" : "/dashboard");
     } catch (err) {
       toast.error(err.response?.data?.detail || "Login failed");
     } finally {
@@ -28,12 +29,14 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-rose-50 flex items-center justify-center px-4 py-12">
-      <div className="card w-full max-w-md">
+    <div className="px-4 py-8">
+      <div className="card">
         <div className="text-center mb-6">
-          <FiShield className="text-primary-600 text-5xl mx-auto mb-2" />
-          <h1 className="text-2xl font-bold text-gray-800">Sign in to SafeGuard</h1>
-          <p className="text-gray-500 text-sm mt-1">Your safety dashboard awaits.</p>
+          <div className="w-16 h-16 bg-gradient-to-br from-primary-500 to-rose-600 rounded-3xl flex items-center justify-center mx-auto mb-3 shadow-lg">
+            <FiShield className="text-white text-3xl" />
+          </div>
+          <h1 className="text-xl font-bold text-gray-800">Welcome Back</h1>
+          <p className="text-gray-500 text-sm mt-1">Sign in to your SafeGuard account.</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

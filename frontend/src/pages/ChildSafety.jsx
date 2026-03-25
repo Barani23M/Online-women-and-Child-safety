@@ -1,94 +1,133 @@
-import { FiUsers, FiShield, FiPhone, FiBook, FiAlertTriangle } from "react-icons/fi";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { childSafetyAPI } from "../services/api";
+import toast from "react-hot-toast";
+import { FiShield, FiBookOpen, FiAlertCircle, FiMonitor, FiUserCheck, FiHeart } from "react-icons/fi";
 
-const topics = [
-  { icon: "🚫", title: "Good Touch / Bad Touch", desc: "Help children understand the difference between appropriate and inappropriate touching. Teach them it's okay to say NO to adults." },
-  { icon: "🗣", title: "Speak Up, Stay Safe", desc: "Encourage children to tell a trusted adult if anyone makes them uncomfortable or touches them inappropriately." },
-  { icon: "📱", title: "Online Safety for Children", desc: "Protect children from online predators, cyberbullying, and inappropriate content. Monitor screen time and digital interactions." },
-  { icon: "🔒", title: "Personal Space & Body Autonomy", desc: "Teach children that their body belongs to them. No adult should touch them without permission." },
-  { icon: "🏫", title: "School Safety", desc: "Know the signs of bullying, abuse by teachers, and peer pressure. Children have the right to a safe learning environment." },
-  { icon: "😔", title: "Recognizing Abuse Signs", desc: "Sudden behavior changes, withdrawal, nightmares, reluctance to go to school, unexplained injuries — these may be warning signs." },
-  { icon: "⚖", title: "POCSO Act (2012)", desc: "The Protection of Children from Sexual Offences Act protects all children under 18. Reporting is mandatory for anyone aware of child abuse." },
-  { icon: "📞", title: "Child Helplines", desc: "CHILDLINE 1098 is available 24/7 for children in distress. Any child or adult can call on behalf of a child in need." },
-];
-
-const tips = [
-  "Never leave children unattended with strangers",
-  "Teach children their full name, parents' names, and a trusted phone number",
-  "Use 'no secrets' rule — make sure children know they can share everything with parents",
-  "Monitor social media and online games regularly",
-  "Maintain open communication so children feel safe talking about discomfort",
-  "Know your child's friends, teachers, and other adults in their life",
-  "Teach children to call CHILDLINE 1098 if they need help",
-];
+const CATEGORY_MAP = {
+  abuse_prevention: { icon: <FiShield size={18} className="text-rose-500" />, label: "Abuse Prevention", color: "border-rose-200 bg-rose-50" },
+  online_safety:    { icon: <FiMonitor size={18} className="text-blue-500" />, label: "Online Safety",    color: "border-blue-200 bg-blue-50" },
+  rights:           { icon: <FiBookOpen size={18} className="text-purple-500" />, label: "Child Rights",    color: "border-purple-200 bg-purple-50" },
+  parenting:        { icon: <FiHeart size={18} className="text-pink-500" />, label: "Parenting Guide",   color: "border-pink-200 bg-pink-50" },
+  general:          { icon: <FiUserCheck size={18} className="text-emerald-500" />, label: "General Safety",  color: "border-emerald-200 bg-emerald-50" },
+};
 
 export default function ChildSafety() {
+  const [tips, setTips]         = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [filter, setFilter]     = useState("all");
+
+  useEffect(() => {
+    childSafetyAPI.get()
+      .then(res => setTips(res.data))
+      .catch(() => toast.error("Failed to load safety tips"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = filter === "all" ? tips : tips.filter(t => t.category === filter);
+
+  // Derive unique categories from fetched data (fallback to "general" if missing)
+  const availableCategories = ["all", ...new Set(tips.map(t => t.category || "general"))];
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary-600 border-t-transparent" />
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10">
-      {/* Header */}
+    <div className="max-w-5xl mx-auto px-4 py-10 pb-24">
+      
+      {/* Premium Header */}
       <div className="text-center mb-10">
-        <FiUsers className="text-blue-500 text-5xl mx-auto mb-2" />
-        <h1 className="text-3xl font-bold text-gray-800">Child Safety & Protection</h1>
-        <p className="text-gray-500 mt-2 max-w-xl mx-auto">Resources, guidance, and awareness to protect children from abuse, exploitation, and harm.</p>
+        <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-200">
+          <FiShield className="text-white text-3xl" />
+        </div>
+        <h1 className="text-3xl font-extrabold text-gray-800 tracking-tight">Child Safety Hub</h1>
+        <p className="text-gray-500 mt-2 max-w-lg mx-auto text-sm leading-relaxed">
+          Age-appropriate educational content, abuse prevention techniques, and online safety guidelines to empower children and parents.
+        </p>
       </div>
 
-      {/* CHILDLINE Banner */}
-      <div className="bg-blue-600 text-white rounded-2xl p-6 mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-extrabold mb-1">CHILDLINE — 1098</h2>
-          <p className="text-blue-100">24/7 emergency outreach for children in distress. Free, confidential, available to all.</p>
+      {/* Filter Tabs */}
+      <div className="flex flex-wrap gap-2 justify-center mb-10">
+        {availableCategories.map(cat => {
+          const cData = CATEGORY_MAP[cat] || CATEGORY_MAP.general;
+          const isAll = cat === "all";
+          return (
+            <button key={cat} onClick={() => setFilter(cat)}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all border-2 ${
+                filter === cat
+                  ? "bg-primary-600 text-white border-primary-600 shadow-md transform scale-105"
+                  : "bg-white text-gray-600 border-gray-100 hover:border-primary-200 hover:bg-primary-50"
+              }`}>
+              {!isAll && (
+                <span className={filter === cat ? "text-white" : cData.icon.props.className}>{cData.icon.type({ size: 16 })}</span>
+              )}
+              {isAll ? "All Topics" : cData.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Grid of Tips */}
+      {filtered.length === 0 ? (
+        <div className="text-center py-20 bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
+          <FiAlertCircle size={40} className="mx-auto text-gray-300 mb-3" />
+          <h3 className="text-gray-600 font-bold">No tips found</h3>
+          <p className="text-gray-400 text-sm mt-1">Select a different category</p>
         </div>
-        <a href="tel:1098" className="bg-white text-blue-700 font-extrabold py-3 px-8 rounded-xl text-xl hover:bg-blue-50 transition flex-shrink-0">
-          📞 Call 1098
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filtered.map(tip => {
+            const cData = CATEGORY_MAP[tip.category] || CATEGORY_MAP.general;
+            return (
+              <div key={tip.id} className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm hover:shadow-xl transition-all duration-300 group flex flex-col h-full">
+                
+                {/* Card Header (Icon + Badge) */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-transform group-hover:scale-110 ${cData.color}`}>
+                    {cData.icon}
+                  </div>
+                  {tip.age_group && (
+                    <span className="bg-gray-100 text-gray-600 text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider">
+                      Age: {tip.age_group}
+                    </span>
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1">
+                  <h3 className="font-bold text-gray-800 text-lg mb-2 leading-tight group-hover:text-primary-600 transition-colors">
+                    {tip.title}
+                  </h3>
+                  <p className="text-gray-600 text-sm leading-relaxed mb-4">
+                    {tip.content}
+                  </p>
+                </div>
+
+                <div className="border-t border-gray-50 pt-4 mt-auto">
+                  <p className="text-xs font-semibold text-primary-600 uppercase tracking-widest flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary-500" />
+                    {cData.label}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Emergency CTA */}
+      <div className="mt-12 bg-gradient-to-br from-rose-500 to-red-600 rounded-3xl p-8 lg:p-10 flex flex-col md:flex-row items-center justify-between shadow-2xl shadow-red-200">
+        <div className="text-white mb-6 md:mb-0 text-center md:text-left">
+          <h2 className="text-2xl font-extrabold mb-2">Notice Child Abuse?</h2>
+          <p className="text-red-100 max-w-md">Under the POCSO Act, reporting child abuse is mandatory. Call the national child helpline immediately to save a life.</p>
+        </div>
+        <a href="tel:1098" className="bg-white text-red-600 font-extrabold px-8 py-4 rounded-full text-lg shadow-lg hover:shadow-xl transition-transform hover:scale-105 active:scale-95 flex items-center gap-2">
+          📞 Dial 1098
         </a>
-      </div>
-
-      {/* Topics */}
-      <h2 className="text-xl font-bold text-gray-800 mb-5">Child Safety Topics</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
-        {topics.map((t) => (
-          <div key={t.title} className="card border border-gray-100 hover:shadow-md transition">
-            <div className="text-3xl mb-3">{t.icon}</div>
-            <h3 className="font-bold text-gray-800 mb-2">{t.title}</h3>
-            <p className="text-gray-500 text-sm">{t.desc}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Safety Tips */}
-      <div className="card bg-green-50 border border-green-200 mb-8">
-        <h2 className="font-bold text-green-800 text-lg mb-3">✅ Safety Tips for Parents & Guardians</h2>
-        <ul className="space-y-2">
-          {tips.map((tip) => (
-            <li key={tip} className="flex items-start gap-2 text-sm text-green-900">
-              <span className="mt-0.5">•</span> {tip}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Legal Info */}
-      <div className="card border border-purple-200 bg-purple-50 mb-8">
-        <h2 className="font-bold text-purple-800 text-lg mb-3">⚖ Legal Protection for Children</h2>
-        <div className="space-y-3 text-sm text-purple-900">
-          <div><strong>POCSO Act 2012:</strong> Protects children under 18 from sexual abuse. Mandatory reporting by all. Special fast-track courts.</div>
-          <div><strong>Right to Education Act 2009:</strong> Free & compulsory education for all children 6–14. Protects against discrimination.</div>
-          <div><strong>Prohibition of Child Marriage Act 2006:</strong> Marriage of girl below 18 or boy below 21 is illegal.</div>
-          <div><strong>Child Labour (Prohibition) Act:</strong> Employment of children below 14 is prohibited.</div>
-        </div>
-        <Link to="/legal-resources" className="inline-block mt-4 text-primary-600 text-sm hover:underline font-medium">→ View All Legal Resources</Link>
-      </div>
-
-      {/* Report */}
-      <div className="card bg-red-50 border border-red-200 text-center">
-        <FiAlertTriangle className="text-red-500 text-3xl mx-auto mb-2" />
-        <h2 className="font-bold text-red-800 text-xl mb-2">Witnessed Child Abuse?</h2>
-        <p className="text-red-700 text-sm mb-4">You are legally obligated to report under POCSO Act. Call 1098 or file a police complaint immediately.</p>
-        <div className="flex flex-wrap justify-center gap-3">
-          <a href="tel:1098" className="bg-blue-600 text-white font-bold py-2.5 px-6 rounded-xl hover:bg-blue-700 transition">📞 1098 CHILDLINE</a>
-          <a href="tel:100" className="bg-red-600 text-white font-bold py-2.5 px-6 rounded-xl hover:bg-red-700 transition">📞 100 Police</a>
-          <Link to="/report" className="bg-primary-600 text-white font-bold py-2.5 px-6 rounded-xl hover:bg-primary-700 transition">Report Online</Link>
-        </div>
       </div>
     </div>
   );

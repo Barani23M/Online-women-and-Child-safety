@@ -13,45 +13,110 @@ API.interceptors.request.use(async (config) => {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const authAPI = {
-  login: (data) => API.post("/api/auth/login", data),
-  register: (data) => API.post("/api/auth/register", data),
-  me: () => API.get("/api/auth/me"),
+  login:         (data)     => API.post("/api/auth/login", data),
+  register:      (data)     => API.post("/api/auth/register", data),
+  me:            ()         => API.get("/api/auth/me"),
+  updateProfile: (data)     => API.put("/api/auth/me", data),
+  changePassword:(data)     => API.post("/api/auth/change-password", data),
+  getContacts:   ()         => API.get("/api/auth/trusted-contacts"),
+  addContact:    (data)     => API.post("/api/auth/trusted-contacts", data),
+  updateContact: (id, data) => API.put(`/api/auth/trusted-contacts/${id}`, data),
+  deleteContact: (id)       => API.delete(`/api/auth/trusted-contacts/${id}`),
+  searchUser:    (email)    => API.get("/api/auth/search", { params: { email } }),
 };
 
 // ─── Incidents ───────────────────────────────────────────────────────────────
 export const incidentAPI = {
-  report: (data) => API.post("/api/incidents/", data),
-  my: () => API.get("/api/incidents/my"),
-  all: () => API.get("/api/incidents/"),
-  updateStatus: (id, status, note = "") =>
-    API.patch(`/api/incidents/${id}/status`, { status, admin_note: note }),
+  report:          (data)     => API.post("/api/incidents/report", data),
+  my:              ()         => API.get("/api/incidents/my"),
+  all:             (params)   => API.get("/api/incidents/", { params }),
+  get:             (id)       => API.get(`/api/incidents/${id}`),
+  update:          (id, data) => API.patch(`/api/incidents/${id}`, data),
+  deleteMyIncident:(id)       => API.delete(`/api/incidents/my/${id}`),
 };
 
 // ─── SOS ─────────────────────────────────────────────────────────────────────
 export const sosAPI = {
-  trigger: (data) => API.post("/api/sos/", data),
-  myAlerts: () => API.get("/api/sos/my-alerts"),
+  trigger:  (data) => API.post("/api/sos/trigger", data),
+  resolve:  (id)   => API.post(`/api/sos/resolve/${id}`),
+  resolveActive: () => API.post("/api/sos/resolve-active"),
+  myAlerts: ()     => API.get("/api/sos/my-alerts"),
+  active:   ()     => API.get("/api/sos/active"),
+  checkParents: () => API.get("/api/sos/check-parents"),  // ← NEW: Check if user has linked parents
 };
 
-// ─── Resources ───────────────────────────────────────────────────────────────
+// ─── Helplines ───────────────────────────────────────────────────────────────
 export const helplineAPI = {
-  list: () => API.get("/api/helplines/"),
+  list: (category) => API.get("/api/helplines/", { params: category ? { category } : {} }),
 };
 
-export const resourceAPI = {
-  list: (type) => API.get(`/api/resources/?resource_type=${type}`),
+// ─── Legal Resources ─────────────────────────────────────────────────────────
+export const legalAPI = {
+  list:   (category) => API.get("/api/resources/legal", { params: category ? { category } : {} }),
+  getOne: (id)       => API.get(`/api/resources/legal/${id}`),
 };
 
+// ─── Counseling Resources ────────────────────────────────────────────────────
+export const counselingAPI = {
+  list:   (category) => API.get("/api/counseling/", { params: category ? { category } : {} }),
+  getOne: (id)       => API.get(`/api/counseling/${id}`),
+};
+
+// ─── Child Safety ────────────────────────────────────────────────────────────
+export const childSafetyAPI = {
+  list:   (category) => API.get("/api/child-safety/", { params: category ? { category } : {} }),
+  getOne: (id)       => API.get(`/api/child-safety/${id}`),
+};
+
+// ─── Safe Places ─────────────────────────────────────────────────────────────
 export const safePlaceAPI = {
-  list: () => API.get("/api/safe-places/"),
+  list:   (params)              => API.get("/api/safe-places/", { params: params || {} }),
+  nearby: (lat, lon, radius_km) => API.get("/api/safe-places/nearby", { params: { lat, lon, radius_km: radius_km || 10 } }),
+  getOne: (id)                  => API.get(`/api/safe-places/${id}`),
+};
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+export const notificationsAPI = {
+  get:         ()   => API.get("/api/notifications/"),
+  unreadCount: ()   => API.get("/api/notifications/unread-count"),
+  markRead:    (id) => API.patch(`/api/notifications/${id}/read`),
+  markAllRead: ()   => API.patch("/api/notifications/read-all"),
+  delete:      (id) => API.delete(`/api/notifications/${id}`),
 };
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
 export const adminAPI = {
-  users: () => API.get("/api/admin/users"),
-  toggleUser: (id) => API.patch(`/api/admin/users/${id}/toggle-active`),
-  sosAlerts: () => API.get("/api/admin/sos-alerts"),
-  resolveSOS: (id) => API.patch(`/api/admin/sos-alerts/${id}/resolve`),
+  stats:            ()         => API.get("/api/admin/stats"),
+  users:            (params)   => API.get("/api/admin/users", { params: params || {} }),
+  getUser:          (id)       => API.get(`/api/admin/users/${id}`),
+  toggleUser:       (id)       => API.patch(`/api/admin/users/${id}/toggle-active`),
+  updateRole:       (id, role) => API.patch(`/api/admin/users/${id}/role`, null, { params: { role } }),
+  deleteUser:       (id)       => API.delete(`/api/admin/users/${id}`),
+  sosAlerts:        (params)   => API.get("/api/admin/sos-alerts", { params: params || {} }),
+  resolveSOS:       (id)       => API.patch(`/api/admin/sos-alerts/${id}/resolve`),
+  deleteSOS:        (id)       => API.delete(`/api/admin/sos-alerts/${id}`),
+  getIncidents:     (params)   => API.get("/api/admin/incidents", { params: params || {} }),
+  activityLogs:     (params)   => API.get("/api/admin/activity-logs", { params: params || {} }),
+  sendNotification: (data)     => API.post("/api/admin/notifications/send", data),
+};
+
+// ─── Family / Guardian ────────────────────────────────────────────────────────
+export const familyAPI = {
+  requestLink:     (parentEmail) => API.post("/api/family/request-link", { parent_email: parentEmail }),
+  pendingRequests: ()            => API.get("/api/family/pending-requests"),
+  accept:          (linkId)      => API.post(`/api/family/accept/${linkId}`),
+  reject:          (linkId)      => API.post(`/api/family/reject/${linkId}`),
+  unlink:          (linkId)      => API.delete(`/api/family/unlink/${linkId}`),
+  myParents:       ()            => API.get("/api/family/my-parents"),
+  myChildren:      ()            => API.get("/api/family/my-children"),
+  allMyLinks:      ()            => API.get("/api/family/my-links"),
+  sendAlert:       (data)        => API.post("/api/family/alert", data),
+  getAlerts:       (params)      => API.get("/api/family/alerts", { params: params || {} }),
+  unreadCount:     ()            => API.get("/api/family/alerts/unread-count"),
+  markRead:        (id)          => API.patch(`/api/family/alerts/${id}/read`),
+  markAllRead:     ()            => API.patch("/api/family/alerts/mark-all-read"),
+  deleteAlert:     (id)          => API.delete(`/api/family/alerts/${id}`),
 };
 
 export default API;
+

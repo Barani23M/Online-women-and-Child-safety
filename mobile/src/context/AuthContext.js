@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { authAPI } from "../services/api";
+import { initDB, saveUser, getUser, clearAllData } from "../services/db";
 
 const AuthContext = createContext({});
 
@@ -12,11 +13,23 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     (async () => {
       try {
+        await initDB();
         const savedToken = await AsyncStorage.getItem("token");
         if (savedToken) {
           setToken(savedToken);
-          const { data } = await authAPI.me();
-          setUser(data);
+          try {
+            const { data } = await authAPI.me();
+            setUser(data);
+            await saveUser(data);
+          } catch {
+            // Network unavailable — load from local SQLite cache
+            const cached = await getUser();
+            if (cached) {
+              setUser(cached);
+            } else {
+              await AsyncStorage.removeItem("token");
+            }
+          }
         }
       } catch {
         await AsyncStorage.removeItem("token");
@@ -31,6 +44,7 @@ export function AuthProvider({ children }) {
     await AsyncStorage.setItem("token", data.access_token);
     setToken(data.access_token);
     setUser(data.user);
+    await saveUser(data.user);
     return data.user;
   };
 
@@ -39,17 +53,37 @@ export function AuthProvider({ children }) {
     await AsyncStorage.setItem("token", data.access_token);
     setToken(data.access_token);
     setUser(data.user);
-    return data.user;
+    await saveUser(data.user);
+    return data;
+  };
+
+  // Direct login with token and user data (used after registration)
+  const loginWithToken = async (token, userData) => {
+    await AsyncStorage.setItem("token", token);
+    setToken(token);
+    setUser(userData);
+    await saveUser(userData);
   };
 
   const logout = async () => {
     await AsyncStorage.removeItem("token");
+    await clearAllData();
     setToken(null);
     setUser(null);
   };
 
+  // Role helpers
+  const isParent = user?.role === "parent";
+  const isChild  = user?.role === "child";
+  const isWomen  = user?.role === "women";
+  const isAdmin  = user?.role === "admin";
+  const canSOS   = ["user", "child", "women"].includes(user?.role);
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, token, loading, login, register, loginWithToken, logout,
+               isParent, isChild, isWomen, isAdmin, canSOS }}
+    >
       {children}
     </AuthContext.Provider>
   );
