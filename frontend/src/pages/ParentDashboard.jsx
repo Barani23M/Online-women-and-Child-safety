@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { familyAPI } from "../services/api";
+import { alertService, sendSOSNotification, requestNotificationPermission } from "../services/alertService";
 import toast from "react-hot-toast";
 import {
   FiUsers, FiBell, FiMapPin, FiCamera, FiCheck, FiX,
@@ -21,77 +22,9 @@ function timeAgo(dateStr) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-// ─── Persistent repeating alarm (Web Audio API) ───────────────────────────────
-// Must be unlocked via a user-gesture button first (browser autoplay policy).
-class AlarmManager {
-  constructor() {
-    this.ctx = null;
-    this.intervalId = null;
-  }
 
-  _init() {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (this.ctx.state === "suspended") this.ctx.resume();
-  }
+// ─── Alert triggered from fetchUnread ─────────────────────────────────
 
-  // Call once from a click handler to satisfy autoplay policy
-  unlock() {
-    this._init();
-    const buf = this.ctx.createBuffer(1, 1, 22050);
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(this.ctx.destination);
-    src.start(0);
-  }
-
-  // Single siren burst (~1.2 s)
-  _burst() {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    [
-      [960,  t,        0.14],
-      [1440, t + 0.17, 0.14],
-      [960,  t + 0.34, 0.14],
-      [1760, t + 0.51, 0.22],
-      [960,  t + 0.80, 0.14],
-      [1440, t + 0.97, 0.14],
-    ].forEach(([freq, start, dur]) => {
-      const osc  = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.type = "square";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.45, start);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-      osc.start(start);
-      osc.stop(start + dur + 0.05);
-    });
-  }
-
-  // Starts repeating bursts every 4 s until stop() is called
-  start() {
-    if (this.intervalId) return;
-    this._init();
-    this._burst();
-    this.intervalId = setInterval(() => this._burst(), 4000);
-  }
-
-  stop() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-  }
-
-  isPlaying() { return this.intervalId !== null; }
-}
-
-const alarm = new AlarmManager();
-
-// ─── Embedded map section ─────────────────────────────────────────────────────
 function MapSection({ lat, lon, address }) {
   if (!lat && !lon) {
     return (
@@ -278,8 +211,19 @@ export default function ParentDashboard() {
         setTab("Alerts");
         fetchAlerts();
 
+        // Get the latest alert for notification details
+        try {
+          const alertsRes = await familyAPI.getAlerts();
+          const latestAlert = alertsRes.data?.[0];
+          if (latestAlert) {
+            sendSOSNotification(latestAlert.ward_name, latestAlert.address);
+          }
+        } catch (e) {
+          console.log("Failed to fetch alert details:", e);
+        }
+
         if (soundOn) {
-          alarm.start();    // starts repeating every 4 s
+          alertService.start();    // starts repeating siren + vibration every 4 s
           setAlarmOn(true);
         }
 
@@ -308,18 +252,23 @@ export default function ParentDashboard() {
       .finally(() => setLoading(false));
 
     const iv = setInterval(() => { fetchAlerts(); fetchUnread(); }, 15000);
-    return () => { clearInterval(iv); alarm.stop(); };
+    return () => { clearInterval(iv); alertService.stop(); };
   }, [fetchAlerts, fetchChildren, fetchPending, fetchUnread, fetchWardIncidents]);
+
+  // Request notification permission on mount
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
 
   // ── Sound controls ───────────────────────────────────────────────────────────
   const enableSound = () => {
-    alarm.unlock();
+    alertService.unlock();
     setSoundOn(true);
-    toast.success("🔔 Sound alerts enabled! You'll hear an alarm on every SOS.", { duration: 5000 });
+    toast.success("🔔 Sound alerts enabled! You'll hear an alarm + vibration on every SOS.", { duration: 5000 });
   };
 
   const stopAlarm = () => {
-    alarm.stop();
+    alertService.stop();
     setAlarmOn(false);
   };
 
@@ -450,8 +399,8 @@ export default function ParentDashboard() {
           <FiVolumeX size={20} className="flex-shrink-0 text-amber-500 mt-0.5" />
           <span>
             <strong>Sound alerts are OFF.</strong> Click{" "}
-            <em>"Enable Sound Alerts"</em> above — you'll hear a loud repeating alarm
-            the moment your ward triggers SOS, even when this tab is in the background.
+            <em>"Enable Sound Alerts"</em> above — you'll hear a LOUD repeating siren
+            + feel vibrations the moment your ward triggers SOS, even on mobile when the app is in background.
           </span>
         </div>
       )}

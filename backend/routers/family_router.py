@@ -7,7 +7,7 @@ which stores the location + selfie and marks alerts for every linked parent.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import get_db, User, UserRole, FamilyLink, FamilyLinkStatus, FamilyAlert, Incident
+from database import get_db, User, UserRole, FamilyLink, FamilyLinkStatus, FamilyAlert, Incident, Notification
 from schemas import (
     FamilyLinkRequest, FamilyLinkOut,
     FamilyAlertCreate, FamilyAlertOut,
@@ -96,6 +96,18 @@ def request_link(
     db.add(link)
     db.commit()
     db.refresh(link)
+    
+    # Send notification to parent
+    notif = Notification(
+        user_id=parent.id,
+        title=f"Family Link Request from {current_user.full_name}",
+        message=f"{current_user.full_name} ({current_user.email}) wants to link with you as a guardian. Please confirm or reject this request.",
+        notification_type="family_link_request",
+        related_incident_id=None,
+    )
+    db.add(notif)
+    db.commit()
+    
     return {"message": "Link request sent to guardian.", "link_id": link.id}
 
 

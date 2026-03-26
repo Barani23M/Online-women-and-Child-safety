@@ -26,6 +26,7 @@ import ParentDashboard from "./pages/ParentDashboard";
 import ShareLocation from './pages/ShareLocation';
 import CounselingCall       from './pages/CounselingCall';
 import CounselorDashboard  from './pages/CounselorDashboard';
+import FamilyLinking       from './pages/FamilyLinking';
 
 function getDefaultRoute(user) {
   if (!user) return "/login";
@@ -106,6 +107,7 @@ function AppContent() {
           <Route path="/my-incidents"     element={<PrivateRoute><MyIncidents /></PrivateRoute>} />
           <Route path="/safe-routes"      element={<PrivateRoute><SafeRoutes /></PrivateRoute>} />
           <Route path="/share-location"   element={<PrivateRoute><ShareLocation /></PrivateRoute>} />
+          <Route path="/family-linking"   element={<PrivateRoute><FamilyLinking /></PrivateRoute>} />
           <Route path="/profile"          element={<PrivateRoute><Profile /></PrivateRoute>} />
           <Route path="/notifications"    element={<PrivateRoute><Notifications /></PrivateRoute>} />
           <Route path="/parent-dashboard" element={<PrivateRoute><ParentDashboard /></PrivateRoute>} />

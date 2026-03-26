@@ -71,7 +71,7 @@ const CHILD_ACTIONS = [
     iconBg: "bg-red-600 text-white",
   },
   {
-    title: "Link Guardian", desc: "Connect parent/guardian", link: "/profile?tab=family",
+    title: "Link Guardian", desc: "Connect parent/guardian", link: "/family-linking",
     icon: <FiLink className="w-5 h-5" />,
     cardBg: "bg-indigo-50 border-indigo-100",
     iconBg: "bg-indigo-600 text-white",
