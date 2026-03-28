@@ -1,6 +1,24 @@
 import axios from "axios";
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://localhost:8000";
+const DEFAULT_WEB_API_URL = "http://localhost:8000";
+const DEFAULT_ANDROID_API_URL = "http://192.168.161.220:8000";
+
+function resolveApiBaseUrl() {
+  if (process.env.REACT_APP_API_BASE_URL) {
+    return process.env.REACT_APP_API_BASE_URL;
+  }
+
+  const isNativeAndroid =
+    typeof navigator !== "undefined" &&
+    /android/i.test(navigator.userAgent || "") &&
+    typeof window !== "undefined" &&
+    typeof window.location !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+  return isNativeAndroid ? DEFAULT_ANDROID_API_URL : DEFAULT_WEB_API_URL;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 const API = axios.create({ baseURL: API_BASE_URL });
 
 API.interceptors.request.use((config) => {
@@ -135,6 +153,10 @@ export const adminAPI = {
   deleteIncident: (id) => API.delete(`/api/incidents/${id}`),
   activityLogs: (params) => API.get("/api/admin/activity-logs", { params: params || {} }),
   sendNotification: (data) => API.post("/api/admin/notifications/send", data),
+  createCounselor: (data) => API.post("/api/admin/counselors", data),
+  listCounselors: () => API.get("/api/admin/counselors"),
+  deleteCounselor: (id) => API.delete(`/api/admin/counselors/${id}`),
+  toggleCounselor: (id) => API.patch(`/api/admin/counselors/${id}/toggle-active`),
 };
 
 export default API;

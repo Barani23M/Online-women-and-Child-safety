@@ -19,28 +19,67 @@ export default function ShareLocation() {
   const [pos, setPos] = useState(null);
   const [sharing, setSharing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [locError, setLocError] = useState("");
   const watchId = useRef(null);
   const mapRef = useRef(null);
 
-  // Initialize Map
-  useEffect(() => {
+  const stopSharing = () => {
+    if (watchId.current !== null) {
+      navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+    }
+    setSharing(false);
+  };
+
+  const detectInitialLocation = () => {
+    setLoading(true);
+    setLocError("");
+
     if (!navigator.geolocation) {
       toast.error("Geolocation is not supported by your browser");
+      setLocError("Geolocation is not supported on this device.");
       setLoading(false);
       return;
     }
 
+    let settled = false;
+    const hardTimeout = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      setLoading(false);
+      setLocError("Location request timed out. Please enable GPS and try again.");
+      toast.error("Location request timed out. Try again.");
+    }, 12000);
+
     navigator.geolocation.getCurrentPosition(
       (p) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(hardTimeout);
         setPos({ lat: p.coords.latitude, lng: p.coords.longitude });
         setLoading(false);
       },
       (err) => {
-        toast.error("Please enable location services");
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(hardTimeout);
+        const msg =
+          err?.code === 1
+            ? "Location permission denied. Please allow location access."
+            : err?.code === 2
+              ? "Unable to get GPS signal. Move to open sky and try again."
+              : "Location request timed out. Please try again.";
+        setLocError(msg);
+        toast.error(msg);
         setLoading(false);
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 15000 }
     );
+  };
+
+  // Initialize Map
+  useEffect(() => {
+    detectInitialLocation();
 
     return () => stopSharing();
   }, []);
@@ -63,14 +102,6 @@ export default function ShareLocation() {
       (err) => toast.error("Lost location signal"),
       { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
     );
-  };
-
-  const stopSharing = () => {
-    if (watchId.current !== null) {
-      navigator.geolocation.clearWatch(watchId.current);
-      watchId.current = null;
-    }
-    setSharing(false);
   };
 
   const sendLocationUpdate = async (lat, lng) => {
@@ -195,6 +226,13 @@ export default function ShareLocation() {
            <p className="text-gray-500 text-sm max-w-sm">
              We need access to your device's location to show you on the map and share it with your emergency contacts.
            </p>
+           {locError && <p className="text-xs text-rose-600 mt-3 font-semibold">{locError}</p>}
+           <button
+             onClick={detectInitialLocation}
+             className="mt-5 px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800"
+           >
+             Try Again
+           </button>
         </div>
       )}
     </div>

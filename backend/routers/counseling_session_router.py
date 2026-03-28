@@ -186,6 +186,9 @@ def waiting_sessions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user.role not in (UserRole.counselor, UserRole.admin):
+        raise HTTPException(status_code=403, detail="Counselor or admin access required")
+
     sessions = (
         db.query(CounselingSession)
         .filter(CounselingSession.status == SessionStatus.waiting)
@@ -240,6 +243,13 @@ def end_session(
     ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    is_owner = session.user_id == current_user.id
+    is_assigned_counselor = session.counselor_id == current_user.id if session.counselor_id else False
+    is_admin = current_user.role == UserRole.admin
+    if not (is_owner or is_assigned_counselor or is_admin):
+        raise HTTPException(status_code=403, detail="Not allowed to end this session")
+
     session.status   = SessionStatus.ended
     session.ended_at = datetime.utcnow()
     db.commit()
@@ -271,6 +281,12 @@ async def signalling_ws(
         db.close()
         return
 
+    # Only session owner, counselors, or admins can join the signaling room.
+    if user.id != session.user_id and user.role not in (UserRole.counselor, UserRole.admin):
+        await websocket.close(code=4003)
+        db.close()
+        return
+
     await websocket.accept()
 
     # Register in room
@@ -279,7 +295,7 @@ async def signalling_ws(
     rooms[room_id][user.id] = websocket
 
     # If a counselor is joining an active room, update DB
-    if session.user_id != user.id and not session.counselor_id:
+    if user.role in (UserRole.counselor, UserRole.admin) and session.user_id != user.id and not session.counselor_id:
         session.counselor_id = user.id
         session.status       = SessionStatus.active
         session.started_at   = datetime.utcnow()

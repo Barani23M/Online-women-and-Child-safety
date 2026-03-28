@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { sosAPI, familyAPI } from "../services/api";
+import { sosAPI } from "../services/api";
 import toast from "react-hot-toast";
 import {
   FiAlertTriangle, FiMapPin, FiCheckCircle, FiCamera,
-  FiUsers, FiShield, FiPhone, FiX, FiRefreshCw,
+  FiUsers, FiShield, FiX, FiRefreshCw,
 } from "react-icons/fi";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
@@ -165,10 +165,24 @@ export default function SOSPage() {
   const triggerSOS = async () => {
     setLoading(true);
     try {
+      if (!parentCheck.hasParents) {
+        toast.error("Link at least one guardian before triggering SOS.");
+        return;
+      }
+
       const loc    = await getLocation();
-      if (loc) setLocation(loc);
-      const selfie = selfiePreview || await captureSelfie(false);
-      if (selfie) setSelfiePreview(selfie);
+      if (!loc) {
+        toast.error("Location is required. Please enable GPS and try again.");
+        return;
+      }
+      setLocation(loc);
+
+      const selfie = selfiePreview || await captureSelfie(true);
+      if (!selfie) {
+        toast.error("Selfie is required. Please allow camera access or upload a photo.");
+        return;
+      }
+      setSelfiePreview(selfie);
 
       const payload = {
         message:   `EMERGENCY! ${user.full_name} needs immediate help!`,
@@ -181,29 +195,14 @@ export default function SOSPage() {
       const sosId = res.data.id;
       setAlertId(sosId);
       setSosActive(true);
-
-      // Also notify family
-      try {
-        const fRes = await familyAPI.sendAlert({
-          latitude:    loc?.lat  ?? null,
-          longitude:   loc?.lng  ?? null,
-          selfie_data: selfie    ?? null,
-          message:     `🚨 EMERGENCY! ${user.full_name} has triggered SOS and needs immediate help!`,
-          sos_alert_id: sosId,
-        });
-        const count = fRes.data?.notified_parent_ids?.length ?? 0;
-        setFamilyNotified(count);
-        const msg = count > 0
-          ? `🚨 SOS SENT! ${count} guardian(s) notified with location${selfie ? " & selfie" : ""}.`
-          : "🚨 SOS ALERT SENT! Call 112 immediately.";
-        toast.error(msg, { duration: 8000 });
-      } catch {
-        toast.error("🚨 SOS ALERT SENT! Call 112 immediately.", { duration: 6000 });
-      }
+      setFamilyNotified(parentCheck.count || 0);
+      toast.error(
+        `🚨 SOS SENT! ${parentCheck.count || 0} guardian(s) notified with live location and selfie.`,
+        { duration: 8000 }
+      );
     } catch (err) {
-      // BUG FIX: if trigger itself fails (e.g. already active), still check existing
       const existingMsg = err?.response?.data?.detail;
-      toast.error(existingMsg || "Failed to send SOS — call 112 immediately!");
+      toast.error(existingMsg || "Failed to send SOS. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -383,7 +382,7 @@ export default function SOSPage() {
                 <div className="text-left text-xs text-amber-800">
                   <p className="font-bold mb-1">⚠️ No Linked Guardians</p>
                   <p className="text-amber-700">You don't have any linked parents/guardians yet. Ask a parent to link with your account so they receive your SOS alerts with location & selfie.</p>
-                  <Link to="/parent-dashboard" className="inline-block mt-2 text-amber-700 font-bold underline hover:no-underline">
+                  <Link to="/family-linking" className="inline-block mt-2 text-amber-700 font-bold underline hover:no-underline">
                     → Set up family linking
                   </Link>
                 </div>
@@ -464,8 +463,8 @@ export default function SOSPage() {
                 <img src={selfiePreview} alt="SOS selfie" className="w-full max-h-52 object-cover" />
               </div>
             ) : (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-sm text-amber-700 text-left">
-                📷 Camera not available — guardians notified with GPS only.
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-sm text-amber-700 text-left font-semibold">
+                📷 A selfie is required for SOS verification.
               </div>
             )}
 
@@ -482,18 +481,9 @@ export default function SOSPage() {
           </div>
         )}
 
-        {/* Emergency Helplines */}
         <div className="mt-8 border-t pt-6">
-          <p className="text-gray-600 font-bold mb-3 text-sm">Emergency Helplines</p>
-          <div className="flex flex-wrap justify-center gap-2">
-            {[["112","Emergency"],["1091","Women"],["1098","Children"],["100","Police"],["108","Ambulance"],["1930","Cyber"]].map(([num, label]) => (
-              <a key={num} href={`tel:${num}`}
-                className="flex flex-col items-center bg-red-50 hover:bg-red-100 border border-red-200 rounded-2xl px-4 py-3 transition active:scale-95">
-                <span className="font-extrabold text-red-700 text-lg leading-none">{num}</span>
-                <span className="text-xs text-gray-500 mt-0.5">{label}</span>
-              </a>
-            ))}
-          </div>
+          <p className="text-gray-600 font-bold mb-2 text-sm">Guardian Emergency Delivery</p>
+          <p className="text-xs text-gray-500">SOS will be delivered directly to your linked parents/guardians with live location and camera selfie evidence.</p>
         </div>
       </div>
 
@@ -504,7 +494,7 @@ export default function SOSPage() {
         </h2>
         <ul className="space-y-2 text-sm text-gray-600">
           {[
-            "Your trusted contacts receive an emergency notification instantly",
+            "Your linked parents/guardians receive an emergency notification instantly",
             "Your live GPS location is captured and shared",
             "A selfie is auto-taken from your camera and sent to linked guardians",
             "Linked guardians receive live location + selfie on their dashboard",
@@ -515,10 +505,6 @@ export default function SOSPage() {
               <span>{tip}</span>
             </li>
           ))}
-          <li className="flex items-start gap-2 text-red-600 font-semibold">
-            <FiAlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-            Always call 112 in immediate life-threatening situations
-          </li>
         </ul>
         <div className="mt-4 bg-blue-50 border border-blue-100 rounded-2xl p-3 text-sm text-blue-700">
           <strong>Guardian Setup:</strong> Ask your parent/guardian to register as a "Guardian" account, then go to{" "}

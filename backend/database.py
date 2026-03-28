@@ -33,8 +33,21 @@ def get_db():
 def init_db():
     """Initialize database: create tables and seed data."""
     Base.metadata.create_all(bind=engine)
+    _run_sqlite_migrations()
     from seed import seed
     seed()
+
+
+def _run_sqlite_migrations():
+    """Apply minimal SQLite migrations for older local DB files."""
+    if not SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+        return
+
+    with engine.begin() as conn:
+        cols = conn.exec_driver_sql("PRAGMA table_info('sos_alerts')").fetchall()
+        col_names = {row[1] for row in cols}
+        if "selfie_data" not in col_names:
+            conn.exec_driver_sql("ALTER TABLE sos_alerts ADD COLUMN selfie_data TEXT")
 
 
 def get_db_stats(db):

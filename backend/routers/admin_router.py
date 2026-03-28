@@ -1,13 +1,58 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from database import get_db, User, Incident, SOSAlert, IncidentType, ActivityLog, Notification, UserRole as UREnum
+from sqlalchemy.exc import IntegrityError
+from database import (
+    get_db,
+    User,
+    Incident,
+    SOSAlert,
+    IncidentType,
+    ActivityLog,
+    Notification,
+    UserRole as UREnum,
+    FamilyAlert,
+    FamilyLink,
+    CounselingSession,
+)
 from schemas import DashboardStats, UserOut, SOSOut, IncidentOut
 from auth import require_admin
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from pydantic import BaseModel, EmailStr, Field
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
+
+
+class CounselorCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    password: str = Field(min_length=6)
+    phone: Optional[str] = None
+
+
+class NotificationSendIn(BaseModel):
+    title: str
+    message: str
+    notification_type: str = "info"
+    user_id: Optional[int] = None
+
+
+_SOS_ACTIVE_WINDOW_MINUTES = 30
+
+
+def _expire_stale_active_sos(db: Session) -> int:
+    """Auto-resolve stale SOS alerts so dashboard shows current emergencies."""
+    cutoff = datetime.utcnow() - timedelta(minutes=_SOS_ACTIVE_WINDOW_MINUTES)
+    stale_alerts = db.query(SOSAlert).filter(
+        SOSAlert.is_active == True,
+        SOSAlert.created_at < cutoff,
+    ).all()
+    for alert in stale_alerts:
+        alert.is_active = False
+        if not alert.resolved_at:
+            alert.resolved_at = datetime.utcnow()
+    return len(stale_alerts)
 
 
 def log_action(db: Session, admin_id: int, action: str, target_type: str = None, target_id: int = None, details: str = None):
@@ -19,6 +64,9 @@ def log_action(db: Session, admin_id: int, action: str, target_type: str = None,
 
 @router.get("/stats", response_model=DashboardStats)
 def get_stats(db: Session = Depends(get_db), admin=Depends(require_admin)):
+    if _expire_stale_active_sos(db) > 0:
+        db.commit()
+
     total_users = db.query(User).count()
     total_incidents = db.query(Incident).count()
     active_sos = db.query(SOSAlert).filter(SOSAlert.is_active == True).count()
@@ -85,6 +133,11 @@ def toggle_user(user_id: int, db: Session = Depends(get_db), admin=Depends(requi
 def update_role(user_id: int, role: str, db: Session = Depends(get_db), admin=Depends(require_admin)):
     if role not in [r.value for r in UREnum]:
         raise HTTPException(status_code=400, detail="Invalid role. Valid: user, admin, counselor")
+    if role == UREnum.counselor.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Counselor role cannot be assigned here. Use /api/admin/counselors to create personal counselor accounts.",
+        )
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -102,10 +155,36 @@ def delete_user(user_id: int, db: Session = Depends(get_db), admin=Depends(requi
         raise HTTPException(status_code=404, detail="User not found")
     if user.role == UREnum.admin:
         raise HTTPException(status_code=400, detail="Cannot delete admin account")
-    log_action(db, admin.id, "delete_user", "user", user_id, f"Deleted user {user.email}")
-    db.delete(user)
-    db.commit()
-    return {"message": "User deleted"}
+
+    try:
+        # Clean dependent records that don't have cascade rules on backrefs.
+        db.query(FamilyAlert).filter(
+            (FamilyAlert.child_user_id == user_id) | (FamilyAlert.parent_user_id == user_id)
+        ).delete(synchronize_session=False)
+
+        db.query(FamilyLink).filter(
+            (FamilyLink.child_user_id == user_id)
+            | (FamilyLink.parent_user_id == user_id)
+            | (FamilyLink.requested_by_id == user_id)
+        ).delete(synchronize_session=False)
+
+        db.query(CounselingSession).filter(CounselingSession.user_id == user_id).delete(synchronize_session=False)
+        db.query(CounselingSession).filter(CounselingSession.counselor_id == user_id).update(
+            {CounselingSession.counselor_id: None}, synchronize_session=False
+        )
+
+        db.query(Notification).filter(Notification.user_id == user_id).delete(synchronize_session=False)
+
+        log_action(db, admin.id, "delete_user", "user", user_id, f"Deleted user {user.email}")
+        db.delete(user)
+        db.commit()
+        return {"message": "User deleted"}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete this user due to related records. Resolve linked data first.",
+        )
 
 
 # ─── SOS Alerts ──────────────────────────────────────────────────────────
@@ -118,6 +197,9 @@ def get_all_sos(
     db: Session = Depends(get_db),
     _=Depends(require_admin)
 ):
+    if _expire_stale_active_sos(db) > 0:
+        db.commit()
+
     query = db.query(SOSAlert)
     if is_active is not None:
         query = query.filter(SOSAlert.is_active == is_active)
@@ -194,26 +276,45 @@ def get_activity_logs(
 
 @router.post("/notifications/send")
 def send_notification(
-    user_id: int,
-    title: str,
-    message: str,
-    notification_type: str = "info",
+    data: NotificationSendIn,
     db: Session = Depends(get_db),
     admin=Depends(require_admin)
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    notif = Notification(
-        user_id=user_id,
-        title=title,
-        message=message,
-        notification_type=notification_type,
-    )
-    db.add(notif)
-    log_action(db, admin.id, "send_notification", "user", user_id, f"Sent: {title}")
+    # Single-user send
+    if data.user_id is not None:
+        user = db.query(User).filter(User.id == data.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        notif = Notification(
+            user_id=data.user_id,
+            title=data.title,
+            message=data.message,
+            notification_type=data.notification_type,
+        )
+        db.add(notif)
+        log_action(db, admin.id, "send_notification", "user", data.user_id, f"Sent: {data.title}")
+        db.commit()
+        return {"message": "Notification sent", "count": 1}
+
+    # Broadcast send to all active users
+    users = db.query(User).filter(User.is_active == True).all()
+    if not users:
+        return {"message": "No active users to notify", "count": 0}
+
+    for u in users:
+        db.add(
+            Notification(
+                user_id=u.id,
+                title=data.title,
+                message=data.message,
+                notification_type=data.notification_type,
+            )
+        )
+
+    log_action(db, admin.id, "broadcast_notification", "user", None, f"Broadcast: {data.title}")
     db.commit()
-    return {"message": "Notification sent"}
+    return {"message": "Broadcast sent", "count": len(users)}
 
 
 
@@ -221,30 +322,39 @@ def send_notification(
 
 @router.post("/counselors")
 def create_counselor(
-    full_name: str,
-    email: str,
-    password: str,
-    phone: str = None,
+    data: CounselorCreate,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
 ):
     from auth import hash_password
-    existing = db.query(User).filter(User.email == email).first()
+
+    email = data.email.strip().lower()
+    existing = db.query(User).filter(func.lower(User.email) == email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+
     counselor = User(
-        full_name=full_name,
+        full_name=data.full_name,
         email=email,
-        phone=phone or None,
-        hashed_password=hash_password(password),
+        phone=(data.phone or None),
+        hashed_password=hash_password(data.password),
         role=UREnum.counselor,
         is_active=True,
     )
     db.add(counselor)
-    log_action(db, admin.id, "create_counselor", "user", None, "Created counselor: " + email)
     db.commit()
     db.refresh(counselor)
-    return {"id": counselor.id, "full_name": counselor.full_name, "email": counselor.email, "phone": counselor.phone, "role": str(counselor.role), "is_active": counselor.is_active, "created_at": str(counselor.created_at)}
+    log_action(db, admin.id, "create_counselor", "user", counselor.id, "Created counselor: " + email)
+    db.commit()
+    return {
+        "id": counselor.id,
+        "full_name": counselor.full_name,
+        "email": counselor.email,
+        "phone": counselor.phone,
+        "role": counselor.role.value,
+        "is_active": counselor.is_active,
+        "created_at": str(counselor.created_at),
+    }
 
 
 @router.get("/counselors")
