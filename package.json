@@ -1,8 +1,0 @@
-{
-  "name": "safeguard-render-root",
-  "private": true,
-  "version": "1.0.0",
-  "scripts": {
-    "start": "bash -lc 'if command -v python3 >/dev/null 2>&1; then cd backend && python3 -m pip install -r requirements.txt && python3 -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}; elif command -v python >/dev/null 2>&1; then cd backend && python -m pip install -r requirements.txt && python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}; else echo \"Python not found on this Render runtime. Please deploy using render.yaml blueprint.\" && exit 1; fi'"
-  }
-}
