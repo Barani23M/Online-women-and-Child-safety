@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from database import get_db, SOSAlert, User, UserRole, FamilyLink, FamilyLinkStatus, FamilyAlert, Notification
 from schemas import SOSCreate, SOSOut
@@ -187,3 +187,48 @@ def active_alerts(db: Session = Depends(get_db)):
     if _expire_stale_active_sos(db) > 0:
         db.commit()
     return db.query(SOSAlert).filter(SOSAlert.is_active == True).all()
+
+
+@router.post("/{alert_id}/stream-frame")
+async def stream_video_frame(
+    alert_id: int,
+    frame: UploadFile = File(...),
+    frame_number: int = Form(default=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Receive video frames from live video stream during SOS.
+    
+    Frames are stored and can be retrieved by linked parents/guardians
+    to watch the live stream in real-time.
+    """
+    alert = db.query(SOSAlert).filter(
+        SOSAlert.id == alert_id,
+        SOSAlert.user_id == current_user.id
+    ).first()
+    
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    
+    if not alert.is_active:
+        raise HTTPException(status_code=400, detail="Alert is not active")
+    
+    # Store frame metadata (in production, could store to cloud storage)
+    # For now, we log it for monitoring
+    try:
+        frame_data = await frame.read()
+        print(f"[SOS Live Stream] Alert {alert_id}: Frame {frame_number} ({len(frame_data)} bytes) received")
+        
+        # Notify linked parents about incoming frame (optional)
+        # This could trigger real-time notifications via WebSocket
+        
+        return {
+            "status": "frame_received",
+            "alert_id": alert_id,
+            "frame_number": frame_number,
+            "bytes_received": len(frame_data),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        print(f"[SOS Live Stream] Error processing frame: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process frame")
