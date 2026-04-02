@@ -10,17 +10,29 @@ const DEFAULT_ANDROID_API_CANDIDATES = [
   "http://172.16.15.12:8000",
 ];
 
-const normalizeUrl = (url) => {
+const normalizeHttpUrl = (url) => {
   const value = (url || "").trim();
   if (!value) return null;
-  return value.replace(/\/+$/, "");
+  const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  return withScheme.replace(/\/+$/, "");
+};
+
+const normalizeWsUrl = (url) => {
+  const value = (url || "").trim();
+  if (!value) return null;
+  const withScheme = /^wss?:\/\//i.test(value)
+    ? value
+    : /^https?:\/\//i.test(value)
+      ? value.replace(/^http/i, "ws")
+      : `wss://${value}`;
+  return withScheme.replace(/\/+$/, "");
 };
 
 const uniqueUrls = (items) => {
   const out = [];
   const seen = new Set();
   items.forEach((item) => {
-    const url = normalizeUrl(item);
+    const url = normalizeHttpUrl(item);
     if (!url || seen.has(url)) return;
     seen.add(url);
     out.push(url);
@@ -55,7 +67,7 @@ const isNativeAndroidApp = () =>
 
 export function resolveApiBaseUrl() {
   if (process.env.REACT_APP_API_BASE_URL) {
-    return process.env.REACT_APP_API_BASE_URL;
+    return normalizeHttpUrl(process.env.REACT_APP_API_BASE_URL);
   }
 
   return isNativeAndroidApp() ? getAndroidApiCandidates()[0] : DEFAULT_WEB_API_URL;
@@ -117,7 +129,7 @@ const selectReachableAndroidBaseUrl = async () => {
 
 export function resolveWsBaseUrl() {
   if (process.env.REACT_APP_WS_BASE_URL) {
-    return process.env.REACT_APP_WS_BASE_URL;
+    return normalizeWsUrl(process.env.REACT_APP_WS_BASE_URL);
   }
   if (IS_NATIVE_ANDROID) {
     const apiUrl = ANDROID_API_CANDIDATES[androidCandidateIndex] || DEFAULT_ANDROID_API_URL;

@@ -8,9 +8,11 @@ import os
 # Database configuration with performance optimizations
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./safeguard.db")
 
+CONNECT_ARGS = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, 
-    connect_args={"check_same_thread": False},
+    connect_args=CONNECT_ARGS,
     echo=False,  # Set to True for SQL debugging
     pool_pre_ping=True,  # Verify connections before use
 )
