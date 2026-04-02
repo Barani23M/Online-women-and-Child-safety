@@ -3,7 +3,7 @@ import { sosAPI } from "../services/api";
 import toast from "react-hot-toast";
 import {
   FiAlertTriangle, FiMapPin, FiCheckCircle, FiCamera,
-  FiUsers, FiShield, FiX, FiRefreshCw,
+  FiUsers, FiShield, FiX, FiRefreshCw, FiCast,
 } from "react-icons/fi";
 import { useAuth } from "../context/AuthContext";
 import { Link } from "react-router-dom";
@@ -35,9 +35,12 @@ export default function SOSPage() {
   const [initialLoading,  setInitialLoading]  = useState(true);
   const [resolveConfirm,  setResolveConfirm]  = useState(false);
   const [parentCheck,     setParentCheck]     = useState({ loading: true, hasParents: false, count: 0, warning: null }); // ← NEW: parent status
+  const [isStreaming,     setIsStreaming]     = useState(false); // ← NEW: streaming status
 
   const videoRef  = useRef(null);
   const videoInputRef = useRef(null);
+  const streamRef = useRef(null); // ← NEW: stream reference
+  const streamIntervalRef = useRef(null); // ← NEW: streaming interval
 
   const pickVideoFromFile = useCallback(() => {
     return new Promise((resolve) => {
@@ -141,6 +144,85 @@ export default function SOSPage() {
     }
   };
 
+  // ── START LIVE VIDEO STREAMING ──────────────────────────────────────────
+  const startLiveVideoStream = async (sosAlertId) => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        toast.error("Camera access not available. Video streaming disabled.");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+      setCameraActive(true);
+      setIsStreaming(true);
+
+      // Send video frames every 500ms (2 fps for bandwidth efficiency)
+      let frameCount = 0;
+      streamIntervalRef.current = setInterval(async () => {
+        try {
+          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+            const canvas = document.createElement("canvas");
+            canvas.width = videoRef.current.videoWidth;
+            canvas.height = videoRef.current.videoHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(videoRef.current, 0, 0);
+            
+            canvas.toBlob(async (blob) => {
+              if (blob) {
+                try {
+                  const formData = new FormData();
+                  formData.append("frame", blob);
+                  formData.append("frame_number", frameCount++);
+                  
+                  // Send frame to backend
+                  await sosAPI.post(`/sos/${sosAlertId}/stream-frame`, formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                  });
+                } catch (err) {
+                  console.log("Frame send skipped:", err?.response?.status);
+                }
+              }
+            }, "image/jpeg", 0.7);
+          }
+        } catch (err) {
+          console.error("Streaming error:", err);
+        }
+      }, 500);
+
+      toast.success("📹 Live video streaming started!");
+    } catch (err) {
+      toast.error("Could not start video streaming: " + err.message);
+      setIsStreaming(false);
+    }
+  };
+
+  // ── STOP LIVE VIDEO STREAMING ──────────────────────────────────────────
+  const stopLiveVideoStream = () => {
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+    setIsStreaming(false);
+    toast.success("📹 Live video streaming stopped.");
+  };
+
   // ── BUG FIX: On mount, check if user already has an active SOS ──────────
   useEffect(() => {
     if (!user || OBSERVER_ROLES.has(user.role)) { setInitialLoading(false); return; }
@@ -159,6 +241,16 @@ export default function SOSPage() {
       .catch(() => {})
       .finally(() => setInitialLoading(false));
   }, [user]);
+
+  // ── CLEANUP: Stop streaming on unmount ──────────────────────────────────
+  useEffect(() => {
+    return () => {
+      // Stop streaming if page is left while streaming is active
+      if (isStreaming) {
+        stopLiveVideoStream();
+      }
+    };
+  }, [isStreaming]);
 
   // ── Check if user has linked parents ──────────────────────────────────────
   useEffect(() => {
@@ -244,8 +336,12 @@ export default function SOSPage() {
       setAlertId(sosId);
       setSosActive(true);
       setFamilyNotified(parentCheck.count || 0);
+      
+      // ← NEW: Start live video streaming to parents
+      await startLiveVideoStream(sosId);
+      
       toast.error(
-        `🚨 SOS SENT! ${parentCheck.count || 0} guardian(s) notified with live location and live video.`,
+        `🚨 SOS SENT! ${parentCheck.count || 0} guardian(s) notified. 📹 Live video streaming started!`,
         { duration: 8000 }
       );
     } catch (err) {
@@ -261,6 +357,9 @@ export default function SOSPage() {
   const resolveSOS = async () => {
     setResolving(true);
     try {
+      // Stop live video streaming before resolving
+      stopLiveVideoStream();
+      
       // Try resolveActive first (no ID needed — most robust)
       await sosAPI.resolveActive();
       setSosActive(false);
@@ -384,7 +483,9 @@ export default function SOSPage() {
           <div className="text-3xl flex-shrink-0">🚨</div>
           <div className="text-left flex-1">
             <div className="font-extrabold text-base">SOS IS ACTIVE</div>
-            <div className="text-red-100 text-xs">Help is being summoned. Stay on the line.</div>
+            <div className="text-red-100 text-xs">
+              {isStreaming ? "📹 Live video streaming to guardians..." : "Help is being summoned. Stay on the line."}
+            </div>
           </div>
           <div className="w-3 h-3 bg-white rounded-full animate-ping flex-shrink-0" />
         </div>
