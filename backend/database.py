@@ -3,10 +3,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import enum
-import os
 
-# Database configuration with performance optimizations
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./safeguard.db")
+# Local-only database configuration
+SQLALCHEMY_DATABASE_URL = "sqlite:///./safeguard.db"
 
 CONNECT_ARGS = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
 

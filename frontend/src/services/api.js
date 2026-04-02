@@ -1,15 +1,9 @@
 import axios from "axios";
 
-const PRODUCTION_API_URL = "https://online-women-and-child-safety-p6ju.onrender.com";
-const DEFAULT_WEB_API_URL = process.env.REACT_APP_API_BASE_URL || PRODUCTION_API_URL;
-const DEFAULT_ANDROID_API_URL = process.env.REACT_APP_ANDROID_API_BASE_URL || PRODUCTION_API_URL;
-const DEFAULT_ANDROID_API_CANDIDATES = [
-  PRODUCTION_API_URL,
-  "http://192.168.139.220:8000",
-  "http://192.168.31.127:8000",
-  "http://10.52.179.58:8000",
-  "http://172.16.15.12:8000",
-];
+const LOCAL_WEB_API_URL = "http://127.0.0.1:8000";
+const LOCAL_ANDROID_API_URL = "http://172.16.15.208:8000";
+const DEFAULT_WEB_API_URL = process.env.REACT_APP_API_BASE_URL || LOCAL_WEB_API_URL;
+const DEFAULT_ANDROID_API_URL = process.env.REACT_APP_ANDROID_API_BASE_URL || LOCAL_ANDROID_API_URL;
 
 const normalizeHttpUrl = (url) => {
   const value = (url || "").trim();
@@ -29,31 +23,6 @@ const normalizeWsUrl = (url) => {
   return withScheme.replace(/\/+$/, "");
 };
 
-const uniqueUrls = (items) => {
-  const out = [];
-  const seen = new Set();
-  items.forEach((item) => {
-    const url = normalizeHttpUrl(item);
-    if (!url || seen.has(url)) return;
-    seen.add(url);
-    out.push(url);
-  });
-  return out;
-};
-
-const getAndroidApiCandidates = () => {
-  const envCandidates = (process.env.REACT_APP_ANDROID_API_BASE_URLS || "")
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
-
-  return uniqueUrls([
-    ...envCandidates,
-    process.env.REACT_APP_ANDROID_API_BASE_URL,
-    ...DEFAULT_ANDROID_API_CANDIDATES,
-  ]);
-};
-
 const isNativeAndroidApp = () =>
   typeof window !== "undefined" &&
   (
@@ -71,78 +40,26 @@ export function resolveApiBaseUrl() {
     return normalizeHttpUrl(process.env.REACT_APP_API_BASE_URL);
   }
 
-  return isNativeAndroidApp() ? getAndroidApiCandidates()[0] : DEFAULT_WEB_API_URL;
+  return isNativeAndroidApp() ? DEFAULT_ANDROID_API_URL : DEFAULT_WEB_API_URL;
 }
 
 const IS_NATIVE_ANDROID = isNativeAndroidApp();
-const ANDROID_API_CANDIDATES = IS_NATIVE_ANDROID ? getAndroidApiCandidates() : [];
 const API_BASE_URL = resolveApiBaseUrl();
 const API = axios.create({ baseURL: API_BASE_URL, timeout: 6000 });
-let androidCandidateIndex = Math.max(0, ANDROID_API_CANDIDATES.indexOf(API_BASE_URL));
-let androidBaseSelectionPromise = null;
-
-const canUseAbortController = () => typeof AbortController !== "undefined";
-
-const healthCheckWithTimeout = async (baseUrl, timeoutMs = 2500) => {
-  const target = `${baseUrl}/health`;
-
-  if (!canUseAbortController()) {
-    const response = await fetch(target, { method: "GET" });
-    return response.ok;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(target, { method: "GET", signal: controller.signal });
-    return response.ok;
-  } catch (_) {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const selectReachableAndroidBaseUrl = async () => {
-  if (!IS_NATIVE_ANDROID || ANDROID_API_CANDIDATES.length === 0) return API_BASE_URL;
-
-  if (!androidBaseSelectionPromise) {
-    androidBaseSelectionPromise = (async () => {
-      for (let i = 0; i < ANDROID_API_CANDIDATES.length; i += 1) {
-        const candidate = ANDROID_API_CANDIDATES[i];
-        const ok = await healthCheckWithTimeout(candidate);
-        if (ok) {
-          androidCandidateIndex = i;
-          API.defaults.baseURL = candidate;
-          return candidate;
-        }
-      }
-
-      return API.defaults.baseURL || API_BASE_URL;
-    })().finally(() => {
-      androidBaseSelectionPromise = null;
-    });
-  }
-
-  return androidBaseSelectionPromise;
-};
 
 export function resolveWsBaseUrl() {
   if (process.env.REACT_APP_WS_BASE_URL) {
     return normalizeWsUrl(process.env.REACT_APP_WS_BASE_URL);
   }
   if (IS_NATIVE_ANDROID) {
-    const apiUrl = ANDROID_API_CANDIDATES[androidCandidateIndex] || DEFAULT_ANDROID_API_URL;
-    return apiUrl.replace(/^http/i, "ws");
+    return DEFAULT_ANDROID_API_URL.replace(/^http/i, "ws");
   }
-  return "wss://online-women-and-child-safety-p6ju.onrender.com";
+  return "ws://127.0.0.1:8000";
 }
 
 API.interceptors.request.use(async (config) => {
   if (IS_NATIVE_ANDROID) {
-    const resolvedBase = await selectReachableAndroidBaseUrl();
-    config.baseURL = resolvedBase;
+    config.baseURL = DEFAULT_ANDROID_API_URL;
   }
 
   const token = localStorage.getItem("token");
@@ -152,32 +69,7 @@ API.interceptors.request.use(async (config) => {
 
 API.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const config = error?.config;
-    const canSwitchHost =
-      IS_NATIVE_ANDROID &&
-      !!config &&
-      ANDROID_API_CANDIDATES.length > 1 &&
-      !error?.response;
-
-    if (!canSwitchHost) {
-      return Promise.reject(error);
-    }
-
-    config.__hostRetryCount = config.__hostRetryCount || 0;
-    if (config.__hostRetryCount >= ANDROID_API_CANDIDATES.length - 1) {
-      return Promise.reject(error);
-    }
-
-    config.__hostRetryCount += 1;
-    androidCandidateIndex = (androidCandidateIndex + 1) % ANDROID_API_CANDIDATES.length;
-    const nextBaseUrl = ANDROID_API_CANDIDATES[androidCandidateIndex];
-
-    API.defaults.baseURL = nextBaseUrl;
-    config.baseURL = nextBaseUrl;
-
-    return API.request(config);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Auth
