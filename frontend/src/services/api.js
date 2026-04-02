@@ -1,12 +1,13 @@
 import axios from "axios";
 
-const DEFAULT_WEB_API_URL = "http://localhost:8000";
-const DEFAULT_ANDROID_API_URL = process.env.REACT_APP_ANDROID_API_BASE_URL || "http://192.168.139.220:8000";
+const PRODUCTION_API_URL = "https://online-women-and-child-safety-p6ju.onrender.com";
+const DEFAULT_WEB_API_URL = process.env.REACT_APP_API_BASE_URL || PRODUCTION_API_URL;
+const DEFAULT_ANDROID_API_URL = process.env.REACT_APP_ANDROID_API_BASE_URL || PRODUCTION_API_URL;
 const DEFAULT_ANDROID_API_CANDIDATES = [
-  DEFAULT_ANDROID_API_URL,
+  PRODUCTION_API_URL,
+  "http://192.168.139.220:8000",
   "http://192.168.31.127:8000",
   "http://10.52.179.58:8000",
-  "http://192.168.139.220:8000",
   "http://172.16.15.12:8000",
 ];
 
@@ -135,7 +136,7 @@ export function resolveWsBaseUrl() {
     const apiUrl = ANDROID_API_CANDIDATES[androidCandidateIndex] || DEFAULT_ANDROID_API_URL;
     return apiUrl.replace(/^http/i, "ws");
   }
-  return "ws://localhost:8000";
+  return "wss://online-women-and-child-safety-p6ju.onrender.com";
 }
 
 API.interceptors.request.use(async (config) => {
