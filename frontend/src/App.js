@@ -28,6 +28,13 @@ import CounselingCall       from './pages/CounselingCall';
 import CounselorDashboard  from './pages/CounselorDashboard';
 import FamilyLinking       from './pages/FamilyLinking';
 
+const isNativeAndroidWebView =
+  typeof navigator !== "undefined" &&
+  /android/i.test(navigator.userAgent || "") &&
+  typeof window !== "undefined" &&
+  typeof window.location !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
 function getDefaultRoute(user) {
   if (!user) return "/login";
   if (user.role === "admin") return "/admin";
@@ -70,6 +77,46 @@ function CounselorRoute({ children }) {
 
 function AppContent() {
   const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!user || !isNativeAndroidWebView) return;
+
+    const alreadyRequested = sessionStorage.getItem("permissions_requested_v1") === "1";
+    if (alreadyRequested) return;
+
+    const requestAppPermissions = async () => {
+      try {
+        const { Camera } = await import("@capacitor/camera");
+        const current = await Camera.checkPermissions();
+        const hasCamera = current?.camera === "granted";
+        if (!hasCamera) {
+          await Camera.requestPermissions({ permissions: ["camera"] });
+        }
+      } catch {
+        // Keep app usable even if plugin call fails on non-native contexts.
+      }
+
+      try {
+        await new Promise((resolve) => {
+          if (!navigator.geolocation) {
+            resolve();
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(
+            () => resolve(),
+            () => resolve(),
+            { timeout: 8000, maximumAge: 0 }
+          );
+        });
+      } catch {
+        // Location permission denial is handled in feature flows.
+      }
+
+      sessionStorage.setItem("permissions_requested_v1", "1");
+    };
+
+    requestAppPermissions();
+  }, [user]);
 
   if (loading) return (
     <div className="app-shell items-center justify-center">

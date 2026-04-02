@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import get_db, LegalResource, CounselingResource, ChildSafetyTip
+from database import get_db, LegalResource, CounselingResource, ChildSafetyTip, LegalResourceBookmark, User
 from schemas import (LegalResourceOut, LegalResourceCreate, LegalResourceUpdate,
                      CounselingResourceOut, CounselingResourceCreate, CounselingResourceUpdate,
-                     ChildSafetyTipOut, ChildSafetyTipCreate, ChildSafetyTipUpdate)
-from auth import require_admin
+                     ChildSafetyTipOut, ChildSafetyTipCreate, ChildSafetyTipUpdate, LegalBookmarkOut)
+from auth import require_admin, get_current_user
 from typing import List, Optional
 
 resources_router = APIRouter(prefix="/api/resources", tags=["Resources"])
@@ -15,11 +15,24 @@ child_safety_router = APIRouter(prefix="/api/child-safety", tags=["Child Safety"
 # ─── Legal Resources ────────────────────────────────────────────────────
 
 @resources_router.get("/legal", response_model=List[LegalResourceOut])
-def get_legal_resources(category: Optional[str] = None, db: Session = Depends(get_db)):
+def get_legal_resources(category: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(LegalResource)
     if category:
         query = query.filter(LegalResource.category == category)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.filter(
+            (LegalResource.title.ilike(like)) |
+            (LegalResource.summary.ilike(like)) |
+            (LegalResource.law_name.ilike(like))
+        )
     return query.order_by(LegalResource.title).all()
+
+
+@resources_router.get("/legal/categories", response_model=List[str])
+def get_legal_categories(db: Session = Depends(get_db)):
+    rows = db.query(LegalResource.category).distinct().order_by(LegalResource.category).all()
+    return [r[0] for r in rows if r[0]]
 
 
 @resources_router.get("/legal/{resource_id}", response_model=LegalResourceOut)
@@ -59,6 +72,81 @@ def delete_legal_resource(resource_id: int, db: Session = Depends(get_db), _=Dep
     db.delete(res)
     db.commit()
     return {"message": "Legal resource deleted"}
+
+
+@resources_router.get("/legal/bookmarks", response_model=List[LegalBookmarkOut])
+def my_legal_bookmarks(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(LegalResourceBookmark).filter(
+        LegalResourceBookmark.user_id == current_user.id
+    ).order_by(LegalResourceBookmark.created_at.desc()).all()
+
+    out = []
+    for b in rows:
+        out.append({
+            "id": b.id,
+            "user_id": b.user_id,
+            "legal_resource_id": b.legal_resource_id,
+            "created_at": b.created_at,
+            "resource": b.resource,
+        })
+    return out
+
+
+@resources_router.post("/legal/{resource_id}/bookmark", response_model=LegalBookmarkOut)
+def add_legal_bookmark(
+    resource_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    resource = db.query(LegalResource).filter(LegalResource.id == resource_id).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    existing = db.query(LegalResourceBookmark).filter(
+        LegalResourceBookmark.user_id == current_user.id,
+        LegalResourceBookmark.legal_resource_id == resource_id,
+    ).first()
+    if existing:
+        return {
+            "id": existing.id,
+            "user_id": existing.user_id,
+            "legal_resource_id": existing.legal_resource_id,
+            "created_at": existing.created_at,
+            "resource": existing.resource,
+        }
+
+    bookmark = LegalResourceBookmark(user_id=current_user.id, legal_resource_id=resource_id)
+    db.add(bookmark)
+    db.commit()
+    db.refresh(bookmark)
+    return {
+        "id": bookmark.id,
+        "user_id": bookmark.user_id,
+        "legal_resource_id": bookmark.legal_resource_id,
+        "created_at": bookmark.created_at,
+        "resource": bookmark.resource,
+    }
+
+
+@resources_router.delete("/legal/{resource_id}/bookmark")
+def remove_legal_bookmark(
+    resource_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bookmark = db.query(LegalResourceBookmark).filter(
+        LegalResourceBookmark.user_id == current_user.id,
+        LegalResourceBookmark.legal_resource_id == resource_id,
+    ).first()
+    if not bookmark:
+        return {"message": "Bookmark already removed"}
+
+    db.delete(bookmark)
+    db.commit()
+    return {"message": "Bookmark removed"}
 
 
 # ─── Counseling Resources ────────────────────────────────────────────────

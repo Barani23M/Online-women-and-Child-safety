@@ -70,7 +70,7 @@ class SOSCreate(BaseModel):
     longitude: Optional[float] = None
     address: Optional[str] = None
     message: Optional[str] = "EMERGENCY! I need help immediately."
-    selfie_data: Optional[str] = None   # base64 JPEG
+    selfie_data: Optional[str] = None   # base64 video clip
 
 
 class SOSOut(BaseModel):
@@ -83,7 +83,7 @@ class SOSOut(BaseModel):
     is_active: bool
     created_at: datetime
     resolved_at: Optional[datetime] = None
-    selfie_data: Optional[str] = None
+    selfie_data: Optional[str] = None   # base64 video clip
 
     class Config:
         from_attributes = True
@@ -197,6 +197,17 @@ class LegalResourceOut(BaseModel):
     summary: str
     full_text: Optional[str]
     reference_url: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class LegalBookmarkOut(BaseModel):
+    id: int
+    user_id: int
+    legal_resource_id: int
+    created_at: datetime
+    resource: Optional[LegalResourceOut] = None
 
     class Config:
         from_attributes = True
@@ -371,7 +382,7 @@ class FamilyAlertCreate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     address: Optional[str] = None
-    selfie_data: Optional[str] = None          # base64 JPEG
+    selfie_data: Optional[str] = None          # base64 video clip
     message: Optional[str] = "EMERGENCY! I need help immediately."
     sos_alert_id: Optional[int] = None
 
@@ -384,7 +395,7 @@ class FamilyAlertOut(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     address: Optional[str] = None
-    selfie_data: Optional[str] = None
+    selfie_data: Optional[str] = None          # base64 video clip
     message: Optional[str] = None
     is_read: bool
     created_at: datetime

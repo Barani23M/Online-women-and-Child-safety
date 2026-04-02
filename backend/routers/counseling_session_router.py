@@ -19,11 +19,12 @@ Flow:
       { "type": "peer_left",   "data": null  }   ← server-sent
 """
 import uuid
-from datetime import datetime
-from typing import Dict, List
+from datetime import datetime, timedelta
+from typing import Dict
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from database import get_db, User, UserRole, CounselingSession, SessionStatus
 from auth import get_current_user, create_access_token
@@ -38,6 +39,47 @@ router = APIRouter(prefix="/api/sessions", tags=["Counseling Sessions"])
 # ─── In-memory WebSocket room registry ───────────────────────────────────────
 # rooms: { room_id -> { user_id: WebSocket } }
 rooms: Dict[str, Dict[int, WebSocket]] = {}
+
+
+def _parse_scheduled_for(raw: str | None):
+    if not raw:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scheduled_for datetime format")
+
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
+
+
+def _session_to_out(session: CounselingSession, db: Session):
+    user = db.query(User).filter(User.id == session.user_id).first()
+    counselor = db.query(User).filter(User.id == session.counselor_id).first() if session.counselor_id else None
+    duration = None
+    if session.started_at and session.ended_at:
+        duration = int((session.ended_at - session.started_at).total_seconds() // 60)
+
+    return {
+        "room_id": session.room_id,
+        "call_type": session.call_type,
+        "status": session.status,
+        "scheduled_for": str(session.scheduled_for) if session.scheduled_for else None,
+        "topic": session.topic,
+        "notes": session.notes,
+        "user_name": user.full_name if user else "Anonymous",
+        "user_email": user.email if user else None,
+        "counselor_id": session.counselor_id,
+        "counselor_name": counselor.full_name if counselor else None,
+        "started_at": str(session.started_at) if session.started_at else None,
+        "ended_at": str(session.ended_at) if session.ended_at else None,
+        "duration_mins": duration,
+        "created_at": str(session.created_at),
+    }
 
 
 def _get_user_from_token(token: str, db: Session) -> User:
@@ -98,6 +140,13 @@ def counselor_dashboard(
     ).count()
     waiting = db.query(CounselingSession).filter(
         CounselingSession.status == SessionStatus.waiting,
+        or_(CounselingSession.scheduled_for == None, CounselingSession.scheduled_for <= datetime.utcnow()),
+    ).count()
+    upcoming = db.query(CounselingSession).filter(
+        CounselingSession.status == SessionStatus.waiting,
+        CounselingSession.scheduled_for != None,
+        CounselingSession.scheduled_for > datetime.utcnow(),
+        or_(CounselingSession.counselor_id == None, CounselingSession.counselor_id == current_user.id),
     ).count()
     recent = db.query(CounselingSession).filter(
         CounselingSession.counselor_id == current_user.id,
@@ -109,13 +158,14 @@ def counselor_dashboard(
         if s.started_at and s.ended_at:
             duration = int((s.ended_at - s.started_at).total_seconds() // 60)
         recent_out.append({
-            "room_id":    s.room_id,
-            "call_type":  s.call_type,
-            "status":     s.status,
-            "user_name":  u.full_name if u else "Anonymous",
+            "room_id": s.room_id,
+            "call_type": s.call_type,
+            "status": s.status,
+            "user_name": u.full_name if u else "Anonymous",
             "user_email": u.email if u else None,
+            "scheduled_for": str(s.scheduled_for) if s.scheduled_for else None,
             "started_at": str(s.started_at) if s.started_at else None,
-            "ended_at":   str(s.ended_at) if s.ended_at else None,
+            "ended_at": str(s.ended_at) if s.ended_at else None,
             "duration_mins": duration,
             "created_at": str(s.created_at),
         })
@@ -124,6 +174,7 @@ def counselor_dashboard(
         "active_sessions":  active,
         "completed_sessions": ended,
         "waiting_queue":    waiting,
+        "upcoming_appointments": upcoming,
         "recent_sessions":  recent_out,
     }
 
@@ -145,12 +196,14 @@ def counselor_sessions(
         if s.started_at and s.ended_at:
             duration = int((s.ended_at - s.started_at).total_seconds() // 60)
         result.append({
-            "room_id":    s.room_id,
-            "call_type":  s.call_type,
-            "status":     s.status,
-            "user_name":  u.full_name if u else "Anonymous",
+            "room_id": s.room_id,
+            "call_type": s.call_type,
+            "status": s.status,
+            "user_name": u.full_name if u else "Anonymous",
+            "scheduled_for": str(s.scheduled_for) if s.scheduled_for else None,
+            "topic": s.topic,
             "started_at": str(s.started_at) if s.started_at else None,
-            "ended_at":   str(s.ended_at) if s.ended_at else None,
+            "ended_at": str(s.ended_at) if s.ended_at else None,
             "duration_mins": duration,
             "created_at": str(s.created_at),
         })
@@ -160,25 +213,45 @@ def counselor_sessions(
 @router.post("/", summary="Create a new counseling session room")
 def create_session(
     call_type: str = "video",
+    counselor_id: int | None = None,
+    scheduled_for: str | None = None,
+    topic: str | None = None,
+    notes: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if call_type not in ("audio", "video"):
+        raise HTTPException(status_code=400, detail="call_type must be 'audio' or 'video'")
+
+    scheduled_dt = _parse_scheduled_for(scheduled_for)
+    if scheduled_dt and scheduled_dt < datetime.utcnow() - timedelta(minutes=1):
+        raise HTTPException(status_code=400, detail="scheduled_for cannot be in the past")
+
+    assigned_counselor_id = counselor_id
+    if counselor_id is not None:
+        counselor = db.query(User).filter(
+            User.id == counselor_id,
+            User.role == UserRole.counselor,
+            User.is_active == True,
+        ).first()
+        if not counselor:
+            raise HTTPException(status_code=404, detail="Selected counselor is not available")
+
     room_id = str(uuid.uuid4())
     session = CounselingSession(
         room_id=room_id,
         user_id=current_user.id,
-        call_type=call_type if call_type in ("audio", "video") else "video",
+        counselor_id=assigned_counselor_id,
+        call_type=call_type,
         status=SessionStatus.waiting,
+        scheduled_for=scheduled_dt,
+        topic=(topic or "").strip()[:200] or None,
+        notes=(notes or "").strip()[:2000] or None,
     )
     db.add(session)
     db.commit()
     db.refresh(session)
-    return {
-        "room_id":   room_id,
-        "call_type": session.call_type,
-        "status":    session.status,
-        "created_at": str(session.created_at),
-    }
+    return _session_to_out(session, db)
 
 
 @router.get("/waiting", summary="List sessions waiting for a counselor")
@@ -192,6 +265,8 @@ def waiting_sessions(
     sessions = (
         db.query(CounselingSession)
         .filter(CounselingSession.status == SessionStatus.waiting)
+        .filter(or_(CounselingSession.scheduled_for == None, CounselingSession.scheduled_for <= datetime.utcnow()))
+        .filter(or_(CounselingSession.counselor_id == None, CounselingSession.counselor_id == current_user.id))
         .order_by(CounselingSession.created_at)
         .all()
     )
@@ -202,9 +277,31 @@ def waiting_sessions(
             "room_id":    s.room_id,
             "call_type":  s.call_type,
             "user_name":  user.full_name if user else "Anonymous",
+            "scheduled_for": str(s.scheduled_for) if s.scheduled_for else None,
+            "topic": s.topic,
             "created_at": str(s.created_at),
         })
     return result
+
+
+@router.get("/appointments/my", summary="Current user's counseling appointments")
+def my_appointments(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role == UserRole.counselor:
+        sessions = db.query(CounselingSession).filter(
+            CounselingSession.counselor_id == current_user.id,
+            CounselingSession.status.in_([SessionStatus.waiting, SessionStatus.active, SessionStatus.ended, SessionStatus.cancelled]),
+        ).all()
+    else:
+        sessions = db.query(CounselingSession).filter(
+            CounselingSession.user_id == current_user.id,
+            CounselingSession.status.in_([SessionStatus.waiting, SessionStatus.active, SessionStatus.ended, SessionStatus.cancelled]),
+        ).all()
+
+    sessions.sort(key=lambda s: (s.scheduled_for or s.created_at), reverse=True)
+    return [_session_to_out(s, db) for s in sessions]
 
 
 @router.get("/my", summary="Current user's counseling session history")
@@ -219,17 +316,31 @@ def my_sessions(
         .limit(20)
         .all()
     )
-    return [
-        {
-            "room_id":    s.room_id,
-            "call_type":  s.call_type,
-            "status":     s.status,
-            "started_at": str(s.started_at) if s.started_at else None,
-            "ended_at":   str(s.ended_at)   if s.ended_at   else None,
-            "created_at": str(s.created_at),
-        }
-        for s in sessions
-    ]
+    return [_session_to_out(s, db) for s in sessions]
+
+
+@router.patch("/{room_id}/cancel", summary="Cancel a waiting counseling appointment")
+def cancel_session(
+    room_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = db.query(CounselingSession).filter(CounselingSession.room_id == room_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    is_owner = session.user_id == current_user.id
+    is_assigned_counselor = session.counselor_id == current_user.id if session.counselor_id else False
+    is_admin = current_user.role == UserRole.admin
+    if not (is_owner or is_assigned_counselor or is_admin):
+        raise HTTPException(status_code=403, detail="Not allowed to cancel this session")
+    if session.status != SessionStatus.waiting:
+        raise HTTPException(status_code=400, detail="Only waiting appointments can be cancelled")
+
+    session.status = SessionStatus.cancelled
+    session.ended_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Appointment cancelled", "room_id": room_id}
 
 
 @router.post("/{room_id}/end", summary="Mark a session as ended")
@@ -286,6 +397,12 @@ async def signalling_ws(
         await websocket.close(code=4003)
         db.close()
         return
+
+    if user.role == UserRole.counselor and user.id != session.user_id:
+        if session.counselor_id and session.counselor_id != user.id:
+            await websocket.close(code=4003)
+            db.close()
+            return
 
     await websocket.accept()
 

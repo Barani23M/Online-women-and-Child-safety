@@ -26,31 +26,49 @@ class EnhancedAlarmManager {
     src.start(0);
   }
 
-  // Enhanced siren burst with louder volume
+  // Strong guardian siren burst: layered tones + rapid cadence
   _burst() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    
-    // Siren frequencies: alternating high-low pattern (emergency siren style)
+
     [
-      [960,  t,        0.14],
-      [1440, t + 0.17, 0.14],
-      [960,  t + 0.34, 0.14],
-      [1760, t + 0.51, 0.22],
-      [960,  t + 0.80, 0.14],
-      [1440, t + 0.97, 0.14],
-    ].forEach(([freq, start, dur]) => {
-      const osc  = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.type = "square";
-      osc.frequency.value = freq;
-      // Increased volume for louder siren (0.45 -> 0.7)
-      gain.gain.setValueAtTime(0.7, start);
-      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-      osc.start(start);
-      osc.stop(start + dur + 0.05);
+      [820, 1320, t + 0.00, 0.24],
+      [940, 1580, t + 0.26, 0.24],
+      [740, 1760, t + 0.52, 0.26],
+      [980, 1860, t + 0.80, 0.26],
+      [700, 1680, t + 1.08, 0.32],
+    ].forEach(([fromFreq, toFreq, start, dur]) => {
+      const lead = this.ctx.createOscillator();
+      const support = this.ctx.createOscillator();
+      const leadGain = this.ctx.createGain();
+      const supportGain = this.ctx.createGain();
+
+      lead.type = "square";
+      support.type = "sawtooth";
+
+      lead.frequency.setValueAtTime(fromFreq, start);
+      lead.frequency.linearRampToValueAtTime(toFreq, start + dur);
+
+      support.frequency.setValueAtTime(fromFreq * 0.5, start);
+      support.frequency.linearRampToValueAtTime(toFreq * 0.5, start + dur);
+
+      leadGain.gain.setValueAtTime(0.0001, start);
+      leadGain.gain.exponentialRampToValueAtTime(0.95, start + 0.03);
+      leadGain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+
+      supportGain.gain.setValueAtTime(0.0001, start);
+      supportGain.gain.exponentialRampToValueAtTime(0.26, start + 0.03);
+      supportGain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+
+      lead.connect(leadGain);
+      support.connect(supportGain);
+      leadGain.connect(this.ctx.destination);
+      supportGain.connect(this.ctx.destination);
+
+      lead.start(start);
+      support.start(start);
+      lead.stop(start + dur + 0.03);
+      support.stop(start + dur + 0.03);
     });
   }
 
@@ -58,9 +76,9 @@ class EnhancedAlarmManager {
   async _vibrate() {
     try {
       // Use browser's native Vibration API
-      // Pattern: 200ms vibrate, 100ms pause
+      // Pattern tuned for urgency while remaining battery-friendly.
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]);
+        navigator.vibrate([350, 120, 350, 120, 500]);
       }
     } catch (err) {
       console.log("Vibration not available:", err);
@@ -78,11 +96,11 @@ class EnhancedAlarmManager {
     this._burst();
     this._vibrate();
     
-    // Repeat siren burst every 4 seconds + vibrate
+    // Repeat more frequently for a stronger guardian-side alarm.
     this.intervalId = setInterval(() => {
       this._burst();
       this._vibrate();
-    }, 4000);
+    }, 2200);
   }
 
   stop() {

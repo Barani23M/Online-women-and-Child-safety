@@ -61,7 +61,7 @@ def trigger_sos(data: SOSCreate, current_user: User = Depends(get_current_user),
     if not data.selfie_data:
         raise HTTPException(
             status_code=400,
-            detail="Camera selfie is required for SOS verification.",
+                detail="Live video clip is required for SOS verification.",
         )
 
     # Keep only one active SOS per user by resolving any previous open alerts.
@@ -109,7 +109,7 @@ def trigger_sos(data: SOSCreate, current_user: User = Depends(get_current_user),
             Notification(
                 user_id=link.parent_user_id,
                 title=f"SOS from {current_user.full_name}",
-                message=f"{current_user.full_name} triggered SOS with live location and selfie.",
+                message=f"{current_user.full_name} triggered SOS with live location and live video.",
                 notification_type="sos_alert",
                 related_sos_id=alert.id,
             )

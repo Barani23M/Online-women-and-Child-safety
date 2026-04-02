@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { sessionsAPI } from "../services/api";
+import { resolveWsBaseUrl, sessionsAPI } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import toast from "react-hot-toast";
 import {
@@ -15,16 +15,7 @@ const ICE_SERVERS = {
   ],
 };
 
-const WS_BASE = (() => {
-  const isNativeAndroid =
-    typeof navigator !== "undefined" &&
-    /android/i.test(navigator.userAgent || "") &&
-    typeof window !== "undefined" &&
-    typeof window.location !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-
-  return isNativeAndroid ? "ws://192.168.161.220:8000" : "ws://localhost:8000";
-})();
+const WS_BASE = resolveWsBaseUrl();
 
 export default function CounselingCall() {
   const { roomId } = useParams();

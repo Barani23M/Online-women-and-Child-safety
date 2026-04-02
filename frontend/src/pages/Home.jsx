@@ -113,7 +113,7 @@ export default function Home() {
         <p className="section-title">Why SafeGuard?</p>
         <div className="space-y-2">
           {[
-            { icon: <FiAlertTriangle className="text-red-500" />,    text: "One-tap SOS with live GPS + auto-selfie to guardians" },
+            { icon: <FiAlertTriangle className="text-red-500" />,    text: "One-tap SOS with live GPS + auto live video to guardians" },
             { icon: <FiFileText className="text-blue-500" />,        text: "Anonymous incident reporting with status tracking" },
             { icon: <FiUsers className="text-pink-500" />,           text: "Guardian dashboard — real-time child safety monitoring" },
             { icon: <FiBook className="text-purple-500" />,          text: "POCSO, POSH, Domestic Violence Act resources" },

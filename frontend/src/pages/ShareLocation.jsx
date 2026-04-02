@@ -21,6 +21,7 @@ export default function ShareLocation() {
   const [loading, setLoading] = useState(true);
   const [locError, setLocError] = useState("");
   const watchId = useRef(null);
+  const pulseId = useRef(null);
   const mapRef = useRef(null);
 
   const stopSharing = () => {
@@ -28,8 +29,25 @@ export default function ShareLocation() {
       navigator.geolocation.clearWatch(watchId.current);
       watchId.current = null;
     }
+    if (pulseId.current !== null) {
+      window.clearInterval(pulseId.current);
+      pulseId.current = null;
+    }
     setSharing(false);
   };
+
+  const getFreshLocation = () =>
+    new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      );
+    });
 
   const detectInitialLocation = () => {
     setLoading(true);
@@ -73,7 +91,7 @@ export default function ShareLocation() {
         toast.error(msg);
         setLoading(false);
       },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 15000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
@@ -84,13 +102,23 @@ export default function ShareLocation() {
     return () => stopSharing();
   }, []);
 
-  const startSharing = () => {
+  const startSharing = async () => {
     if (!navigator.geolocation) return;
+    setLocError("");
+
+    // Always fetch a fresh GPS point first so sharing starts from current location.
+    const firstFix = await getFreshLocation();
+
+    if (!firstFix) {
+      setLocError("Unable to get current location. Enable GPS and try again.");
+      toast.error("Could not fetch current location.");
+      return;
+    }
+
+    setPos(firstFix);
     setSharing(true);
     toast.success("Live Location Sharing Started");
-
-    // Immediately send the first alert
-    sendLocationUpdate(pos?.lat, pos?.lng);
+    await sendLocationUpdate(firstFix.lat, firstFix.lng);
 
     // Watch position
     watchId.current = navigator.geolocation.watchPosition(
@@ -100,19 +128,28 @@ export default function ShareLocation() {
         sendLocationUpdate(coords.lat, coords.lng);
       },
       (err) => toast.error("Lost location signal"),
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 }
     );
+
+    // Force a fresh GPS pulse periodically for near-real-time tracking.
+    pulseId.current = window.setInterval(async () => {
+      const latest = await getFreshLocation();
+      if (!latest) return;
+      setPos(latest);
+      sendLocationUpdate(latest.lat, latest.lng);
+    }, 7000);
   };
 
   const sendLocationUpdate = async (lat, lng) => {
-    if (!lat || !lng) return;
+    if (lat === null || lat === undefined || lng === null || lng === undefined) return;
     try {
+      const preciseAddress = `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
       // Send location directly to parents/trusted contacts via family API
       await familyAPI.sendAlert({
         message: "Live tracking active",
         latitude: lat,
         longitude: lng,
-        address: "Live Update"
+        address: preciseAddress
       });
     } catch {
       // Slient failure for background updates

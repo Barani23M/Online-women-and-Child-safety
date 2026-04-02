@@ -85,7 +85,7 @@ export function EmptyAlertsState({ soundOn, onEnableSound }) {
       <div className="text-6xl mx-auto mb-3">🔔</div>
       <p className="text-gray-500 font-semibold text-lg">No alerts yet</p>
       <p className="text-sm text-gray-400 mt-1 max-w-xs mx-auto">
-        When a linked ward triggers SOS, their live GPS map and selfie photo
+        When a linked ward triggers SOS, their live GPS map and live video clip
         appear here instantly — with a loud alarm sound.
       </p>
       <div className="mt-8 text-left bg-gradient-to-br from-pink-50 to-purple-50 border border-pink-100 rounded-2xl p-5">
@@ -113,7 +113,7 @@ export function EmptyAlertsState({ soundOn, onEnableSound }) {
           </li>
           <li className="flex gap-2">
             <span className="text-pink-600 font-bold">5.</span>
-            When they press SOS → you instantly get <strong>live map + selfie + repeating alarm</strong>
+            When they press SOS → you instantly get <strong>live map + live video + repeating alarm</strong>
           </li>
         </ol>
       </div>

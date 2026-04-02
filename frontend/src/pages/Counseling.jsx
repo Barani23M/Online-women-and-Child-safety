@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { counselingAPI, sessionsAPI } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -170,6 +170,31 @@ const PERSONAL_COUNSELORS = [
 
 const TODAY = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
 
+function labelToDate(label) {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (label === "Tomorrow") d.setDate(d.getDate() + 1);
+  else if (label === "In 2 days") d.setDate(d.getDate() + 2);
+  else if (label === "In 3 days") d.setDate(d.getDate() + 3);
+  else if (label === "In 4 days") d.setDate(d.getDate() + 4);
+  return d;
+}
+
+function applySlotToDate(dateOnly, slot) {
+  if (!slot) return null;
+  const m = slot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const minute = Number(m[2]);
+  const ap = m[3].toUpperCase();
+  if (ap === "PM" && hour !== 12) hour += 12;
+  if (ap === "AM" && hour === 12) hour = 0;
+
+  const dt = new Date(dateOnly);
+  dt.setHours(hour, minute, 0, 0);
+  return dt;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════ */
 export default function Counseling() {
   const { user }   = useAuth();
@@ -186,12 +211,18 @@ export default function Counseling() {
   const [chosenDate,         setChosenDate]         = useState("Today");
   const [chosenCallType,     setChosenCallType]     = useState("video");
   const [confirmedAppt,      setConfirmedAppt]      = useState(null);
+  const [appointments,       setAppointments]       = useState([]);
+  const [bookingSaving,      setBookingSaving]      = useState(false);
   const [callLoading,        setCallLoading]        = useState(false);
 
   /* Government resources from backend (supplements static list) */
   const [extraResources, setExtraResources] = useState([]);
   /* Live counselors from backend (admin-created counselor-role accounts) */
   const [liveCounselors, setLiveCounselors] = useState([]);
+
+  const loadAppointments = useCallback(() => {
+    sessionsAPI.myAppointments().then(r => setAppointments(r.data || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     counselingAPI.get().then(r => setExtraResources(r.data)).catch(() => {});
@@ -211,6 +242,7 @@ export default function Counseling() {
               languages:     ["English","Hindi"],
               rating:        5.0,
               reviews:       c.total_sessions || 0,
+              counselor_id:  c.id,
               available_slots: slots.slice(0, 3),
               bio:           `Verified counselor. ${c.total_sessions} sessions completed. Contact: ${c.email}`,
               call_types:    ["audio","video"],
@@ -224,7 +256,8 @@ export default function Counseling() {
         setLiveCounselors(mapped);
       })
       .catch(() => {});
-  }, []);
+      loadAppointments();
+      }, [loadAppointments]);
 
   /* ── Government: filter helplines ────────────────────────────────────────── */
   const filteredGov = govFilter === "All"
@@ -252,26 +285,68 @@ export default function Counseling() {
     setBookingStep("book");
   };
 
-  const confirmBooking = () => {
-    setConfirmedAppt({
-      counselor: selectedCounselor,
-      slot: chosenSlot,
-      date: chosenDate,
-      callType: chosenCallType,
-    });
-    setBookingStep("confirmed");
-    toast.success(`Appointment booked with ${selectedCounselor.name}!`);
+  const confirmBooking = async () => {
+    if (!selectedCounselor || !chosenSlot || !chosenDate) {
+      toast.error("Please select date, time, and session type");
+      return;
+    }
+
+    const dt = applySlotToDate(labelToDate(chosenDate), chosenSlot);
+    if (!dt) {
+      toast.error("Invalid time slot selected");
+      return;
+    }
+
+    setBookingSaving(true);
+    try {
+      const payload = {
+        call_type: chosenCallType,
+        scheduled_for: dt.toISOString(),
+        topic: `Counseling with ${selectedCounselor.name}`,
+        notes: `Preferred date: ${chosenDate}; Preferred slot: ${chosenSlot}; Counselor: ${selectedCounselor.name}; Mode: ${chosenCallType}`,
+      };
+      if (selectedCounselor.counselor_id) {
+        payload.counselor_id = selectedCounselor.counselor_id;
+      }
+
+      const res = await sessionsAPI.create(payload);
+      const booked = { ...res.data, counselor: selectedCounselor };
+      setConfirmedAppt(booked);
+      setAppointments((prev) => [booked, ...prev]);
+      loadAppointments();
+      setBookingStep("confirmed");
+      toast.success(`Appointment booked with ${selectedCounselor.name}!`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to book appointment");
+    } finally {
+      setBookingSaving(false);
+    }
   };
 
   const startBookedCall = async () => {
-    if (!user) { navigate("/login"); return; }
+    if (!user || !confirmedAppt?.room_id) { navigate("/login"); return; }
     setCallLoading(true);
     try {
-      const res = await sessionsAPI.create(confirmedAppt.callType);
-      navigate(`/counseling/call/${res.data.room_id}?type=${confirmedAppt.callType}`);
-    } catch {
-      toast.error("Failed to start call. Try again.");
-    } finally { setCallLoading(false); }
+      navigate(`/counseling/call/${confirmedAppt.room_id}?type=${confirmedAppt.call_type || chosenCallType}`);
+    } finally {
+      setCallLoading(false);
+    }
+  };
+
+  const joinAppointment = (appt) => {
+    if (!appt?.room_id) return;
+    navigate(`/counseling/call/${appt.room_id}?type=${appt.call_type || "video"}`);
+  };
+
+  const cancelAppointment = async (roomId) => {
+    try {
+      await sessionsAPI.cancel(roomId);
+      setAppointments((prev) => prev.map((a) => (a.room_id === roomId ? { ...a, status: "cancelled" } : a)));
+      loadAppointments();
+      toast.success("Appointment cancelled");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to cancel appointment");
+    }
   };
 
   /* ══════════════════════════════════════════════════════════════════════════ */
@@ -417,21 +492,21 @@ export default function Counseling() {
                   <div className="mt-5 bg-white/15 rounded-2xl p-4 text-left space-y-2.5">
                     <div className="flex justify-between text-sm">
                       <span className="text-green-100">Counselor</span>
-                      <span className="font-bold">{confirmedAppt.counselor.name}</span>
+                      <span className="font-bold">{confirmedAppt.counselor?.name || confirmedAppt.counselor_name || "Assigned Counselor"}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-green-100">Date</span>
-                      <span className="font-bold">{confirmedAppt.date}</span>
+                      <span className="font-bold">{confirmedAppt.scheduled_for ? new Date(confirmedAppt.scheduled_for).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) : "Today"}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-green-100">Time</span>
-                      <span className="font-bold">{confirmedAppt.slot}</span>
+                      <span className="font-bold">{confirmedAppt.scheduled_for ? new Date(confirmedAppt.scheduled_for).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Now"}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-green-100">Type</span>
                       <span className="font-bold capitalize flex items-center gap-1">
-                        {confirmedAppt.callType === "video" ? <FiVideo size={13}/> : <FiMic size={13}/>}
-                        {confirmedAppt.callType} Call
+                        {(confirmedAppt.call_type || chosenCallType) === "video" ? <FiVideo size={13}/> : <FiMic size={13}/>}
+                        {confirmedAppt.call_type || chosenCallType} Call
                       </span>
                     </div>
                   </div>
@@ -440,19 +515,14 @@ export default function Counseling() {
                 {/* Start call now */}
                 <div className="card">
                   <p className="text-gray-700 font-semibold text-sm text-center mb-4">Ready to connect?</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <button onClick={startBookedCall} disabled={callLoading}
                       className="flex flex-col items-center gap-2 bg-gradient-to-b from-primary-500 to-primary-700 text-white font-bold py-4 rounded-2xl transition active:scale-95 disabled:opacity-60">
                       {callLoading
                         ? <FiLoader className="animate-spin" size={20}/>
-                        : <FiVideo size={20}/>
+                        : ((confirmedAppt.call_type || chosenCallType) === "video" ? <FiVideo size={20}/> : <FiMic size={20}/>)
                       }
-                      <span className="text-sm">Start Video Call</span>
-                    </button>
-                    <button onClick={() => { setChosenCallType("audio"); startBookedCall(); }} disabled={callLoading}
-                      className="flex flex-col items-center gap-2 bg-gradient-to-b from-emerald-500 to-green-600 text-white font-bold py-4 rounded-2xl transition active:scale-95 disabled:opacity-60">
-                      <FiMic size={20}/>
-                      <span className="text-sm">Start Voice Call</span>
+                      <span className="text-sm">Join Scheduled Call</span>
                     </button>
                   </div>
                   <button onClick={() => { setBookingStep("list"); setConfirmedAppt(null); setSelectedCounselor(null); }}
@@ -565,9 +635,9 @@ export default function Counseling() {
                 </div>
 
                 {/* Confirm button */}
-                <button onClick={confirmBooking}
-                  className="w-full bg-gradient-to-r from-primary-600 to-rose-500 text-white font-extrabold py-4 rounded-2xl shadow-lg transition active:scale-95 text-base">
-                  ✓ Confirm Appointment
+                <button onClick={confirmBooking} disabled={bookingSaving}
+                  className="w-full bg-gradient-to-r from-primary-600 to-rose-500 text-white font-extrabold py-4 rounded-2xl shadow-lg transition active:scale-95 text-base disabled:opacity-60">
+                  {bookingSaving ? "Booking..." : "✓ Confirm Appointment"}
                 </button>
                 <button onClick={() => setBookingStep("list")} className="w-full py-3 text-gray-400 text-sm">
                   Cancel
@@ -606,6 +676,66 @@ export default function Counseling() {
                     <span>⚡ Instant connect</span>
                     <span>🆓 100% free</span>
                   </div>
+                </div>
+
+                {/* My appointments */}
+                <div className="card">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                      <FiCalendar size={14} /> My Appointments
+                    </p>
+                    <button onClick={loadAppointments} className="text-xs text-gray-400 hover:text-gray-600">
+                      Refresh
+                    </button>
+                  </div>
+                  {appointments.length === 0 ? (
+                    <p className="text-xs text-gray-400">No appointments booked yet.</p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {appointments.slice(0, 6).map((a) => (
+                        <div key={a.room_id} className="border border-gray-100 rounded-2xl p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{a.topic || "Counseling Appointment"}</p>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              a.status === "waiting"
+                                ? "bg-amber-100 text-amber-700"
+                                : a.status === "active"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : a.status === "cancelled"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-600"
+                            }`}>{a.status}</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1 truncate">
+                            Counselor: {a.counselor_name || a.counselor?.name || "Any available counselor"}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {a.scheduled_for
+                              ? new Date(a.scheduled_for).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+                              : "Immediate session"}
+                          </p>
+                          <div className="mt-2 flex items-center gap-2">
+                            {(a.status === "waiting" || a.status === "active") && (
+                              <button
+                                onClick={() => joinAppointment(a)}
+                                className="text-xs bg-primary-600 text-white font-bold px-3 py-1.5 rounded-lg hover:bg-primary-700"
+                              >
+                                Join
+                              </button>
+                            )}
+                            {a.status === "waiting" && (
+                              <button
+                                onClick={() => cancelAppointment(a.room_id)}
+                                className="text-xs border border-red-200 text-red-600 font-bold px-3 py-1.5 rounded-lg hover:bg-red-50"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Counselor list */}

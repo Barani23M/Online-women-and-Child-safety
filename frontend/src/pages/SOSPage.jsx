@@ -10,6 +10,12 @@ import { Link } from "react-router-dom";
 
 // Roles that cannot trigger SOS
 const OBSERVER_ROLES = new Set(["admin", "parent", "counselor"]);
+const isNativeAndroidWebView =
+  typeof navigator !== "undefined" &&
+  /android/i.test(navigator.userAgent || "") &&
+  typeof window !== "undefined" &&
+  typeof window.location !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
 export default function SOSPage() {
   const { user } = useAuth();
@@ -21,22 +27,21 @@ export default function SOSPage() {
   const [resolving,       setResolving]       = useState(false);
   const [locating,        setLocating]        = useState(false);
   const [location,        setLocation]        = useState(null);
-  const [selfiePreview,   setSelfiePreview]   = useState(null);
+  const [videoPreview,    setVideoPreview]    = useState(null);
   const [familyNotified,  setFamilyNotified]  = useState(0);
   const [cameraActive,    setCameraActive]    = useState(false);
   const [countdown,       setCountdown]       = useState(null);
-  const [capturingSelfie, setCapturingSelfie] = useState(false);
+  const [capturingVideo,  setCapturingVideo]  = useState(false);
   const [initialLoading,  setInitialLoading]  = useState(true);
   const [resolveConfirm,  setResolveConfirm]  = useState(false);
   const [parentCheck,     setParentCheck]     = useState({ loading: true, hasParents: false, count: 0, warning: null }); // ← NEW: parent status
 
   const videoRef  = useRef(null);
-  const canvasRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const videoInputRef = useRef(null);
 
-  const pickSelfieFromFile = useCallback(() => {
+  const pickVideoFromFile = useCallback(() => {
     return new Promise((resolve) => {
-      const input = fileInputRef.current;
+      const input = videoInputRef.current;
       if (!input) {
         resolve(null);
         return;
@@ -49,6 +54,10 @@ export default function SOSPage() {
           resolve(null);
           return;
         }
+        if (!file.type?.startsWith("video/")) {
+          resolve(null);
+          return;
+        }
         const reader = new FileReader();
         reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
         reader.onerror = () => resolve(null);
@@ -58,6 +67,79 @@ export default function SOSPage() {
       input.click();
     });
   }, []);
+
+  const captureLiveVideo = async (allowPickerFallback = true) => {
+    const cleanupStream = (stream) => {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCameraActive(false);
+      setCountdown(null);
+    };
+
+    try {
+      if (isNativeAndroidWebView) {
+        return allowPickerFallback ? await pickVideoFromFile() : null;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        return allowPickerFallback ? await pickVideoFromFile() : null;
+      }
+
+      const stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: true,
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("camera_timeout")), 10000)),
+      ]);
+
+      const preview = videoRef.current;
+      preview.srcObject = stream;
+      preview.muted = true;
+      preview.playsInline = true;
+      setCameraActive(true);
+      await preview.play();
+      await new Promise((r) => { preview.onloadeddata = r; setTimeout(r, 600); });
+
+      for (let i = 3; i >= 1; i--) {
+        setCountdown(i);
+        await new Promise((r) => setTimeout(r, 600));
+      }
+      setCountdown(null);
+
+      const mimeOptions = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+      const supportedMime = mimeOptions.find((m) => MediaRecorder.isTypeSupported?.(m)) || "";
+      const recorder = supportedMime ? new MediaRecorder(stream, { mimeType: supportedMime }) : new MediaRecorder(stream);
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      const stopped = new Promise((resolve) => {
+        recorder.onstop = resolve;
+      });
+
+      recorder.start(300);
+      await new Promise((r) => setTimeout(r, 6000));
+      recorder.stop();
+      await stopped;
+
+      const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+      const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+
+      cleanupStream(stream);
+      return dataUrl;
+    } catch {
+      toast.error("Live video capture failed. Please record and attach a video.");
+      return allowPickerFallback ? await pickVideoFromFile() : null;
+    }
+  };
 
   // ── BUG FIX: On mount, check if user already has an active SOS ──────────
   useEffect(() => {
@@ -110,54 +192,19 @@ export default function SOSPage() {
       );
     });
 
-  // ── Selfie capture ────────────────────────────────────────────────────────
-  const captureSelfie = async (allowPickerFallback = true) => {
+  const handleVideoCapture = async () => {
+    if (capturingVideo) return;
+    setCapturingVideo(true);
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        return allowPickerFallback ? await pickSelfieFromFile() : null;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
-      });
-      const video = videoRef.current;
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-      setCameraActive(true);
-      await video.play();
-      await new Promise((r) => { video.onloadeddata = r; setTimeout(r, 1000); });
-      for (let i = 3; i >= 1; i--) { setCountdown(i); await new Promise((r) => setTimeout(r, 700)); }
-      setCountdown(null);
-      const canvas = canvasRef.current;
-      canvas.width  = video.videoWidth  || 640;
-      canvas.height = video.videoHeight || 480;
-      canvas.getContext("2d").drawImage(video, 0, 0);
-      const base64 = canvas.toDataURL("image/jpeg", 0.7);
-      stream.getTracks().forEach((t) => t.stop());
-      video.srcObject = null;
-      setCameraActive(false);
-      return base64;
-    } catch {
-      setCameraActive(false);
-      setCountdown(null);
-      return allowPickerFallback ? await pickSelfieFromFile() : null;
-    }
-  };
-
-  const handleSelfieCapture = async () => {
-    if (capturingSelfie) return;
-    setCapturingSelfie(true);
-    try {
-      const selfie = await captureSelfie(true);
-      if (selfie) {
-        setSelfiePreview(selfie);
-        toast.success("Selfie attached successfully.");
+      const clip = await captureLiveVideo(false);
+      if (clip) {
+        setVideoPreview(clip);
+        toast.success("Live video attached successfully.");
       } else {
-        toast.error("Could not capture photo. Please try again.");
+        toast.error("Could not capture video. Please try again.");
       }
     } finally {
-      setCapturingSelfie(false);
+      setCapturingVideo(false);
     }
   };
 
@@ -177,18 +224,19 @@ export default function SOSPage() {
       }
       setLocation(loc);
 
-      const selfie = selfiePreview || await captureSelfie(true);
-      if (!selfie) {
-        toast.error("Selfie is required. Please allow camera access or upload a photo.");
+      // Always capture a fresh live video clip for every SOS trigger.
+      const video = await captureLiveVideo(false);
+      if (!video) {
+        toast.error("Live video is required. Please allow camera permission and record a clip.");
         return;
       }
-      setSelfiePreview(selfie);
+      setVideoPreview(video);
 
       const payload = {
         message:   `EMERGENCY! ${user.full_name} needs immediate help!`,
         latitude:  loc?.lat  ?? null,
         longitude: loc?.lng  ?? null,
-        selfie_data: selfie  ?? null,
+        selfie_data: video  ?? null,
       };
 
       const res   = await sosAPI.trigger(payload);
@@ -197,7 +245,7 @@ export default function SOSPage() {
       setSosActive(true);
       setFamilyNotified(parentCheck.count || 0);
       toast.error(
-        `🚨 SOS SENT! ${parentCheck.count || 0} guardian(s) notified with live location and selfie.`,
+        `🚨 SOS SENT! ${parentCheck.count || 0} guardian(s) notified with live location and live video.`,
         { duration: 8000 }
       );
     } catch (err) {
@@ -217,7 +265,7 @@ export default function SOSPage() {
       await sosAPI.resolveActive();
       setSosActive(false);
       setAlertId(null);
-      setSelfiePreview(null);
+      setVideoPreview(null);
       setFamilyNotified(0);
       setLocation(null);
       setResolveConfirm(false);
@@ -228,7 +276,7 @@ export default function SOSPage() {
         // Already resolved (e.g. by admin or another session) — just clear UI
         setSosActive(false);
         setAlertId(null);
-        setSelfiePreview(null);
+        setVideoPreview(null);
         setFamilyNotified(0);
         setLocation(null);
         setResolveConfirm(false);
@@ -282,12 +330,11 @@ export default function SOSPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 text-center">
       {/* Hidden camera elements */}
-      <canvas ref={canvasRef} style={{ display: "none" }} />
       <input
-        ref={fileInputRef}
+        ref={videoInputRef}
         type="file"
-        accept="image/*"
-        capture="user"
+        accept="video/*"
+        capture="environment"
         style={{ display: "none" }}
       />
       <div className={`mb-4 rounded-2xl overflow-hidden border-4 border-red-400 shadow-xl relative bg-black ${cameraActive ? "block" : "hidden"}`}>
@@ -295,7 +342,7 @@ export default function SOSPage() {
         {countdown !== null && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50">
             <span className="text-white text-7xl font-black drop-shadow-lg animate-bounce">{countdown}</span>
-            <span className="text-white text-sm mt-3 font-semibold">📸 Capturing selfie…</span>
+            <span className="text-white text-sm mt-3 font-semibold">🎥 Recording live video…</span>
           </div>
         )}
       </div>
@@ -368,7 +415,7 @@ export default function SOSPage() {
           <p className="text-gray-500 mt-3 text-sm leading-relaxed">
             {sosActive
               ? "Your trusted contacts and linked guardians have been notified. Help is on the way. Stay calm."
-              : "One tap to instantly alert your trusted contacts, share your GPS location, and send a selfie to linked guardians."}
+              : "One tap to instantly alert your trusted contacts, share your GPS location, and send a live video clip to linked guardians."}
           </p>
         </div>
 
@@ -381,7 +428,7 @@ export default function SOSPage() {
                 <FiAlertTriangle className="text-amber-600 text-xl flex-shrink-0 mt-0.5" />
                 <div className="text-left text-xs text-amber-800">
                   <p className="font-bold mb-1">⚠️ No Linked Guardians</p>
-                  <p className="text-amber-700">You don't have any linked parents/guardians yet. Ask a parent to link with your account so they receive your SOS alerts with location & selfie.</p>
+                  <p className="text-amber-700">You don't have any linked parents/guardians yet. Ask a parent to link with your account so they receive your SOS alerts with location & live video.</p>
                   <Link to="/family-linking" className="inline-block mt-2 text-amber-700 font-bold underline hover:no-underline">
                     → Set up family linking
                   </Link>
@@ -390,21 +437,21 @@ export default function SOSPage() {
             )}
 
             <button
-              onClick={handleSelfieCapture}
-              disabled={capturingSelfie || loading || locating}
+              onClick={handleVideoCapture}
+              disabled={capturingVideo || loading || locating}
               className="w-full mb-3 border-2 border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-3 rounded-2xl transition disabled:opacity-60"
             >
-              {capturingSelfie
-                ? "Capturing photo..."
-                : selfiePreview
-                ? "Retake Selfie"
-                : "Attach Selfie (Recommended)"
+              {capturingVideo
+                ? "Recording video..."
+                : videoPreview
+                ? "Retake Live Video"
+                : "Attach Live Video (Recommended)"
               }
             </button>
 
-            {selfiePreview && (
+            {videoPreview && (
               <div className="rounded-2xl overflow-hidden border-2 border-red-200 mb-3">
-                <img src={selfiePreview} alt="SOS selfie preview" className="w-full max-h-44 object-cover" />
+                <video src={videoPreview} className="w-full max-h-56 object-cover" controls playsInline preload="metadata" />
               </div>
             )}
 
@@ -422,7 +469,7 @@ export default function SOSPage() {
             <p className="text-xs text-gray-400 mt-2">Hold and press firmly — this is a real emergency alert</p>
             <div className="mt-5 flex justify-center gap-6 text-xs text-gray-400">
               <span className="flex items-center gap-1"><FiMapPin size={12} /> Live GPS</span>
-              <span className="flex items-center gap-1"><FiCamera size={12} /> Auto Selfie</span>
+              <span className="flex items-center gap-1"><FiCamera size={12} /> Live Video Clip</span>
               <span className="flex items-center gap-1"><FiUsers size={12} /> Notify Guardians</span>
             </div>
           </>
@@ -446,7 +493,7 @@ export default function SOSPage() {
               {familyNotified > 0 && (
                 <p className="text-sm text-red-600 flex items-center gap-1.5">
                   <FiUsers size={13} />
-                  {familyNotified} guardian(s) notified{selfiePreview ? " with location & selfie" : " with location"}
+                  {familyNotified} guardian(s) notified{videoPreview ? " with location & live video" : " with location"}
                 </p>
               )}
               {!location && (
@@ -454,17 +501,17 @@ export default function SOSPage() {
               )}
             </div>
 
-            {/* Selfie or fallback */}
-            {selfiePreview ? (
+            {/* Video or fallback */}
+            {videoPreview ? (
               <div className="rounded-2xl overflow-hidden border-4 border-red-300 shadow-lg">
                 <p className="text-xs text-gray-500 bg-gray-50 py-2 flex items-center justify-center gap-1">
-                  <FiCamera size={11} /> Selfie captured & sent to guardians
+                  <FiCamera size={11} /> Live video captured & sent to guardians
                 </p>
-                <img src={selfiePreview} alt="SOS selfie" className="w-full max-h-52 object-cover" />
+                <video src={videoPreview} className="w-full max-h-60 object-cover" controls playsInline preload="metadata" />
               </div>
             ) : (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-sm text-amber-700 text-left font-semibold">
-                📷 A selfie is required for SOS verification.
+                🎥 A live video clip is required for SOS verification.
               </div>
             )}
 
@@ -483,7 +530,7 @@ export default function SOSPage() {
 
         <div className="mt-8 border-t pt-6">
           <p className="text-gray-600 font-bold mb-2 text-sm">Guardian Emergency Delivery</p>
-          <p className="text-xs text-gray-500">SOS will be delivered directly to your linked parents/guardians with live location and camera selfie evidence.</p>
+          <p className="text-xs text-gray-500">SOS will be delivered directly to your linked parents/guardians with live location and camera live-video evidence.</p>
         </div>
       </div>
 
@@ -496,8 +543,8 @@ export default function SOSPage() {
           {[
             "Your linked parents/guardians receive an emergency notification instantly",
             "Your live GPS location is captured and shared",
-            "A selfie is auto-taken from your camera and sent to linked guardians",
-            "Linked guardians receive live location + selfie on their dashboard",
+            "A short live video clip is auto-recorded and sent to linked guardians",
+            "Linked guardians receive live location + live video on their dashboard",
             "An alert is logged in the system for responders",
           ].map((tip, i) => (
             <li key={i} className="flex items-start gap-2">

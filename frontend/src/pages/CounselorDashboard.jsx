@@ -142,7 +142,7 @@ export default function CounselorDashboard() {
         {stats && (
           <div className="relative grid grid-cols-4 gap-2">
             {[
-              { label: "Total",     val: stats.total_sessions,     icon: <FiActivity size={13}/>,    bg: "bg-white/15" },
+              { label: "Upcoming",  val: stats.upcoming_appointments || 0, icon: <FiCalendar size={13}/>, bg: (stats.upcoming_appointments || 0) > 0 ? "bg-sky-400/40" : "bg-white/15" },
               { label: "Waiting",   val: stats.waiting_queue,      icon: <FiClock size={13}/>,       bg: waiting.length > 0 ? "bg-amber-400/40" : "bg-white/15" },
               { label: "Active",    val: stats.active_sessions,    icon: <FiPhoneCall size={13}/>,  bg: stats.active_sessions > 0 ? "bg-green-400/40" : "bg-white/15" },
               { label: "Done",      val: stats.completed_sessions, icon: <FiCheckCircle size={13}/>, bg: "bg-white/15" },
@@ -178,7 +178,7 @@ export default function CounselorDashboard() {
                     <p className="font-bold text-gray-800 text-sm truncate">{w.user_name}</p>
                     <p className="text-gray-400 text-xs flex items-center gap-1">
                       {w.call_type === "video" ? <FiVideo size={10}/> : <FiMic size={10}/>}
-                      {w.call_type} · waiting since {fmtTime(w.created_at)}
+                      {w.call_type} · {w.scheduled_for ? `scheduled ${fmtTime(w.scheduled_for)}` : `waiting since ${fmtTime(w.created_at)}`}
                     </p>
                   </div>
                   <button
@@ -269,7 +269,7 @@ export default function CounselorDashboard() {
                         <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">Waiting</span>
                       </div>
                       <p className="text-gray-400 text-xs mt-0.5 flex items-center gap-1">
-                        <FiClock size={10}/> Requested at {fmtTime(w.created_at)}
+                        <FiClock size={10}/> {w.scheduled_for ? `Scheduled for ${fmtTime(w.scheduled_for)}` : `Requested at ${fmtTime(w.created_at)}`}
                       </p>
                       <p className="text-gray-400 text-xs flex items-center gap-1 mt-0.5">
                         {w.call_type === "video" ? <FiVideo size={10}/> : <FiMic size={10}/>}

@@ -18,7 +18,7 @@ const ROLES = [
     features: [
       "🆘 One-tap SOS emergency alert",
       "📍 Live GPS location sharing",
-      "📷 Auto selfie sent to guardians",
+      "🎥 Auto live video sent to guardians",
       "📝 Report incidents anonymously",
       "⚖️ Know your legal rights",
       "💬 Counseling & shelter finder",
@@ -39,14 +39,14 @@ const ROLES = [
     features: [
       "🆘 One-tap SOS emergency alert",
       "📍 Live GPS to linked guardian",
-      "📷 Auto selfie to guardian on SOS",
+      "🎥 Auto live video to guardian on SOS",
       "📝 Report incidents safely",
       "🔗 Link to a parent/guardian",
       "📞 Emergency helplines",
       "💬 Counseling resources",
       "🛡️ Child safety guides",
     ],
-    desc: "Trigger SOS and instantly alert your linked parent/guardian with live location and selfie. Stay safe with guardian monitoring.",
+    desc: "Trigger SOS and instantly alert your linked parent/guardian with live location and live video. Stay safe with guardian monitoring.",
   },
   {
     role: "parent",
@@ -60,14 +60,14 @@ const ROLES = [
     features: [
       "🔔 Instant SOS alert notifications",
       "📍 Live GPS location of ward",
-      "📷 Automatic selfie on every SOS",
+      "🎥 Automatic live video on every SOS",
       "🗂️ Full SOS alert history",
       "👥 Monitor multiple children",
       "🔗 Accept ward link requests",
       "📊 Incident reports from ward",
       "🛡️ Guardian safety dashboard",
     ],
-    desc: "Receive instant alerts with live GPS and selfie photo the moment your linked child/ward triggers an SOS. Full monitoring dashboard.",
+    desc: "Receive instant alerts with live GPS and live video the moment your linked child/ward triggers an SOS. Full monitoring dashboard.",
   },
 ];
 
@@ -281,7 +281,7 @@ export default function Register() {
           <p className="text-gray-500 text-sm mb-5 text-center">
             {selectedRole.role === "parent"
               ? "Search for your child/ward to link them. You'll receive their SOS alerts."
-              : "Search for your parent/guardian so they get your SOS alerts with location & selfie."}
+              : "Search for your parent/guardian so they get your SOS alerts with location & live video."}
           </p>
 
           {/* Search form */}

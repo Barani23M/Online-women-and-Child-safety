@@ -643,7 +643,7 @@ export default function Profile() {
                   "They accept from their Guardian Dashboard",
                   "When you press SOS, your guardian instantly gets:",
                   "→ Your live GPS location",
-                  "→ A selfie from your camera",
+                  "→ A live video from your camera",
                   "→ Your emergency message",
                 ].map((s,i) => (
                   <li key={i} className={`flex gap-2 ${s.startsWith("→") ? "pl-4" : ""}`}>

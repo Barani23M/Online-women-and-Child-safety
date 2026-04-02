@@ -63,8 +63,8 @@ function MapSection({ lat, lon, address }) {
 
 // ─── Alert card ───────────────────────────────────────────────────────────────
 function AlertCard({ alert, onMarkRead, onDelete }) {
-  // Auto-expand photo for unread alerts that have a selfie
-  const [photoOpen, setPhotoOpen] = useState(!alert.is_read && !!alert.selfie_data);
+  // Auto-expand media for unread alerts that have a live video clip
+  const [mediaOpen, setMediaOpen] = useState(!alert.is_read && !!alert.selfie_data);
 
   return (
     <div className={`rounded-2xl border-2 p-5 shadow-sm transition-all ${
@@ -108,30 +108,32 @@ function AlertCard({ alert, onMarkRead, onDelete }) {
         <MapSection lat={alert.latitude} lon={alert.longitude} address={alert.address} />
       </div>
 
-      {/* Auto-captured selfie */}
+      {/* Auto-captured live video */}
       {alert.selfie_data && (
         <div className="mt-4">
           <button
-            onClick={() => setPhotoOpen(o => !o)}
+            onClick={() => setMediaOpen(o => !o)}
             className="flex items-center gap-2 text-xs font-bold text-purple-700
                        bg-purple-100 hover:bg-purple-200 px-3 py-1.5 rounded-full transition mb-2">
             <FiCamera size={13} />
-            {photoOpen ? "Hide Selfie" : "📸 View Auto-Captured Selfie"}
+            {mediaOpen ? "Hide Video" : "🎥 View Auto-Captured Live Video"}
           </button>
-          {photoOpen && (
+          {mediaOpen && (
             <div className="rounded-xl overflow-hidden border-2 border-purple-300 shadow-md">
-              <img
+              <video
                 src={alert.selfie_data}
-                alt={`SOS selfie — ${alert.child_name}`}
                 className="w-full max-h-80 object-cover"
+                controls
+                playsInline
+                preload="metadata"
               />
               <div className="bg-purple-50 py-2 px-3 flex items-center justify-between">
                 <span className="text-xs text-purple-700 font-medium">
-                  📷 Auto-captured the moment SOS was triggered
+                  🎥 Auto-recorded the moment SOS was triggered
                 </span>
                 <a
                   href={alert.selfie_data}
-                  download={`sos-selfie-${alert.id}.jpg`}
+                  download={`sos-video-${alert.id}.webm`}
                   className="text-xs bg-purple-600 text-white px-3 py-1
                              rounded-full hover:bg-purple-700 transition font-medium">
                   ⬇ Download
@@ -348,7 +350,7 @@ export default function ParentDashboard() {
             <div>
               <p className="font-extrabold text-xl leading-tight">EMERGENCY ALERT!</p>
               <p className="text-red-100 text-sm mt-0.5">
-                Your ward just triggered SOS. Check the location map and selfie below.
+                Your ward just triggered SOS. Check the location map and live video below.
               </p>
             </div>
           </div>
@@ -500,7 +502,7 @@ export default function ParentDashboard() {
                 <FiBell className="text-gray-200 text-6xl mx-auto mb-3" />
                 <p className="text-gray-500 font-semibold text-lg">No alerts yet</p>
                 <p className="text-sm text-gray-400 mt-1 max-w-xs mx-auto">
-                  When a linked ward triggers SOS, their live GPS map and selfie photo
+                  When a linked ward triggers SOS, their live GPS map and live video clip
                   appear here instantly — with a loud alarm sound.
                 </p>
                 <div className="mt-8 text-left bg-gradient-to-br from-pink-50 to-purple-50
@@ -526,7 +528,7 @@ export default function ParentDashboard() {
                     <li className="flex gap-2">
                       <span className="text-pink-600 font-bold">5.</span>
                       When they press SOS → you instantly get{" "}
-                      <strong>live map + selfie + repeating alarm</strong>
+                      <strong>live map + live video + repeating alarm</strong>
                     </li>
                   </ol>
                 </div>

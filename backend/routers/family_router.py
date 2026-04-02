@@ -3,7 +3,7 @@ Family / Guardian Router
 ------------------------
 Handles parent-child linking and family alert delivery.
 When a child/ward triggers SOS the frontend also calls POST /api/family/alert
-which stores the location + selfie and marks alerts for every linked parent.
+which stores the location + live video clip and marks alerts for every linked parent.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -215,7 +215,7 @@ def all_my_links(
 
 # ─── Family Alerts ────────────────────────────────────────────────────────────
 
-@router.post("/alert", summary="Child triggers family alert (location + selfie) to all linked parents")
+@router.post("/alert", summary="Child triggers family alert (location + live video) to all linked parents")
 def create_family_alert(
     data: FamilyAlertCreate,
     current_user: User = Depends(get_current_user),

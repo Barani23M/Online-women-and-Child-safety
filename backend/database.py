@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, Text, ForeignKey, Enum, Index
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, Text, ForeignKey, Enum, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -48,6 +48,31 @@ def _run_sqlite_migrations():
         col_names = {row[1] for row in cols}
         if "selfie_data" not in col_names:
             conn.exec_driver_sql("ALTER TABLE sos_alerts ADD COLUMN selfie_data TEXT")
+
+        session_cols = conn.exec_driver_sql("PRAGMA table_info('counseling_sessions')").fetchall()
+        session_col_names = {row[1] for row in session_cols}
+        if "scheduled_for" not in session_col_names:
+            conn.exec_driver_sql("ALTER TABLE counseling_sessions ADD COLUMN scheduled_for DATETIME")
+        if "topic" not in session_col_names:
+            conn.exec_driver_sql("ALTER TABLE counseling_sessions ADD COLUMN topic VARCHAR")
+        if "notes" not in session_col_names:
+            conn.exec_driver_sql("ALTER TABLE counseling_sessions ADD COLUMN notes TEXT")
+
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS legal_resource_bookmarks (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                legal_resource_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(legal_resource_id) REFERENCES legal_resources(id)
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_legal_bookmark_user_resource ON legal_resource_bookmarks(user_id, legal_resource_id)"
+        )
 
 
 def get_db_stats(db):
@@ -216,6 +241,22 @@ class LegalResource(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class LegalResourceBookmark(Base):
+    __tablename__ = "legal_resource_bookmarks"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    legal_resource_id = Column(Integer, ForeignKey("legal_resources.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    resource = relationship("LegalResource", foreign_keys=[legal_resource_id])
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "legal_resource_id", name="ux_legal_bookmark_user_resource"),
+        Index("idx_legal_bookmark_user_created", "user_id", "created_at"),
+    )
+
+
 class CounselingResource(Base):
     __tablename__ = "counseling_resources"
     id = Column(Integer, primary_key=True, index=True)
@@ -328,6 +369,9 @@ class CounselingSession(Base):
     counselor_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     call_type = Column(String, default="video")
     status = Column(Enum(SessionStatus), default=SessionStatus.waiting, index=True)
+    scheduled_for = Column(DateTime, nullable=True, index=True)
+    topic = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -337,6 +381,7 @@ class CounselingSession(Base):
     __table_args__ = (
         Index('idx_counseling_session_user_status', 'user_id', 'status'),
         Index('idx_counseling_session_counselor', 'counselor_id'),
+        Index('idx_counseling_session_schedule', 'status', 'scheduled_for'),
     )
 
 

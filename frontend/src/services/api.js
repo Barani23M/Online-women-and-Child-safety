@@ -1,31 +1,171 @@
 import axios from "axios";
 
 const DEFAULT_WEB_API_URL = "http://localhost:8000";
-const DEFAULT_ANDROID_API_URL = "http://192.168.161.220:8000";
+const DEFAULT_ANDROID_API_URL = process.env.REACT_APP_ANDROID_API_BASE_URL || "http://192.168.139.220:8000";
+const DEFAULT_ANDROID_API_CANDIDATES = [
+  DEFAULT_ANDROID_API_URL,
+  "http://192.168.31.127:8000",
+  "http://10.52.179.58:8000",
+  "http://192.168.139.220:8000",
+  "http://172.16.15.12:8000",
+];
 
-function resolveApiBaseUrl() {
+const normalizeUrl = (url) => {
+  const value = (url || "").trim();
+  if (!value) return null;
+  return value.replace(/\/+$/, "");
+};
+
+const uniqueUrls = (items) => {
+  const out = [];
+  const seen = new Set();
+  items.forEach((item) => {
+    const url = normalizeUrl(item);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  });
+  return out;
+};
+
+const getAndroidApiCandidates = () => {
+  const envCandidates = (process.env.REACT_APP_ANDROID_API_BASE_URLS || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  return uniqueUrls([
+    ...envCandidates,
+    process.env.REACT_APP_ANDROID_API_BASE_URL,
+    ...DEFAULT_ANDROID_API_CANDIDATES,
+  ]);
+};
+
+const isNativeAndroidApp = () =>
+  typeof window !== "undefined" &&
+  (
+    !!window.Capacitor?.isNativePlatform?.() ||
+    (
+      typeof navigator !== "undefined" &&
+      /android/i.test(navigator.userAgent || "") &&
+      typeof window.location !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    )
+  );
+
+export function resolveApiBaseUrl() {
   if (process.env.REACT_APP_API_BASE_URL) {
     return process.env.REACT_APP_API_BASE_URL;
   }
 
-  const isNativeAndroid =
-    typeof navigator !== "undefined" &&
-    /android/i.test(navigator.userAgent || "") &&
-    typeof window !== "undefined" &&
-    typeof window.location !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-
-  return isNativeAndroid ? DEFAULT_ANDROID_API_URL : DEFAULT_WEB_API_URL;
+  return isNativeAndroidApp() ? getAndroidApiCandidates()[0] : DEFAULT_WEB_API_URL;
 }
 
+const IS_NATIVE_ANDROID = isNativeAndroidApp();
+const ANDROID_API_CANDIDATES = IS_NATIVE_ANDROID ? getAndroidApiCandidates() : [];
 const API_BASE_URL = resolveApiBaseUrl();
-const API = axios.create({ baseURL: API_BASE_URL });
+const API = axios.create({ baseURL: API_BASE_URL, timeout: 6000 });
+let androidCandidateIndex = Math.max(0, ANDROID_API_CANDIDATES.indexOf(API_BASE_URL));
+let androidBaseSelectionPromise = null;
 
-API.interceptors.request.use((config) => {
+const canUseAbortController = () => typeof AbortController !== "undefined";
+
+const healthCheckWithTimeout = async (baseUrl, timeoutMs = 2500) => {
+  const target = `${baseUrl}/health`;
+
+  if (!canUseAbortController()) {
+    const response = await fetch(target, { method: "GET" });
+    return response.ok;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(target, { method: "GET", signal: controller.signal });
+    return response.ok;
+  } catch (_) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const selectReachableAndroidBaseUrl = async () => {
+  if (!IS_NATIVE_ANDROID || ANDROID_API_CANDIDATES.length === 0) return API_BASE_URL;
+
+  if (!androidBaseSelectionPromise) {
+    androidBaseSelectionPromise = (async () => {
+      for (let i = 0; i < ANDROID_API_CANDIDATES.length; i += 1) {
+        const candidate = ANDROID_API_CANDIDATES[i];
+        const ok = await healthCheckWithTimeout(candidate);
+        if (ok) {
+          androidCandidateIndex = i;
+          API.defaults.baseURL = candidate;
+          return candidate;
+        }
+      }
+
+      return API.defaults.baseURL || API_BASE_URL;
+    })().finally(() => {
+      androidBaseSelectionPromise = null;
+    });
+  }
+
+  return androidBaseSelectionPromise;
+};
+
+export function resolveWsBaseUrl() {
+  if (process.env.REACT_APP_WS_BASE_URL) {
+    return process.env.REACT_APP_WS_BASE_URL;
+  }
+  if (IS_NATIVE_ANDROID) {
+    const apiUrl = ANDROID_API_CANDIDATES[androidCandidateIndex] || DEFAULT_ANDROID_API_URL;
+    return apiUrl.replace(/^http/i, "ws");
+  }
+  return "ws://localhost:8000";
+}
+
+API.interceptors.request.use(async (config) => {
+  if (IS_NATIVE_ANDROID) {
+    const resolvedBase = await selectReachableAndroidBaseUrl();
+    config.baseURL = resolvedBase;
+  }
+
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+
+API.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error?.config;
+    const canSwitchHost =
+      IS_NATIVE_ANDROID &&
+      !!config &&
+      ANDROID_API_CANDIDATES.length > 1 &&
+      !error?.response;
+
+    if (!canSwitchHost) {
+      return Promise.reject(error);
+    }
+
+    config.__hostRetryCount = config.__hostRetryCount || 0;
+    if (config.__hostRetryCount >= ANDROID_API_CANDIDATES.length - 1) {
+      return Promise.reject(error);
+    }
+
+    config.__hostRetryCount += 1;
+    androidCandidateIndex = (androidCandidateIndex + 1) % ANDROID_API_CANDIDATES.length;
+    const nextBaseUrl = ANDROID_API_CANDIDATES[androidCandidateIndex];
+
+    API.defaults.baseURL = nextBaseUrl;
+    config.baseURL = nextBaseUrl;
+
+    return API.request(config);
+  }
+);
 
 // Auth
 export const authAPI = {
@@ -76,8 +216,12 @@ export const helplineAPI = {
 
 // Legal resources
 export const legalAPI = {
-  get: (category) => API.get("/api/resources/legal", { params: category ? { category } : {} }),
+  get: (params) => API.get("/api/resources/legal", { params: params || {} }),
   getOne: (id) => API.get(`/api/resources/legal/${id}`),
+  categories: () => API.get("/api/resources/legal/categories"),
+  myBookmarks: () => API.get("/api/resources/legal/bookmarks"),
+  addBookmark: (id) => API.post(`/api/resources/legal/${id}/bookmark`),
+  removeBookmark: (id) => API.delete(`/api/resources/legal/${id}/bookmark`),
 };
 
 // Counseling resources
@@ -113,9 +257,16 @@ export const sessionsAPI = {
   listCounselors: () => API.get("/api/sessions/counselors"),
   counselorDashboard: () => API.get("/api/sessions/counselor/dashboard"),
   counselorSessions: () => API.get("/api/sessions/counselor/sessions"),
-  create: (call_type) => API.post("/api/sessions/", null, { params: { call_type } }),
+  create: (payload) => {
+    const params = typeof payload === "string"
+      ? { call_type: payload }
+      : (payload || {});
+    return API.post("/api/sessions/", null, { params });
+  },
   waiting: () => API.get("/api/sessions/waiting"),
   my: () => API.get("/api/sessions/my"),
+  myAppointments: () => API.get("/api/sessions/appointments/my"),
+  cancel: (room_id) => API.patch(`/api/sessions/${room_id}/cancel`),
   end: (room_id) => API.post(`/api/sessions/${room_id}/end`),
 };
 
