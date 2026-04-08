@@ -36,6 +36,19 @@ def _get_linked_parent_count(user_id: int, db: Session) -> int:
     return count
 
 
+def _close_parent_sos_alerts(sos_alert_id: int, db: Session) -> None:
+    """Mark parent-facing SOS fanout entries as read when SOS is resolved."""
+    db.query(FamilyAlert).filter(
+        FamilyAlert.sos_alert_id == sos_alert_id,
+        FamilyAlert.is_read == False,
+    ).update({"is_read": True}, synchronize_session=False)
+
+    db.query(Notification).filter(
+        Notification.related_sos_id == sos_alert_id,
+        Notification.is_read == False,
+    ).update({"is_read": True}, synchronize_session=False)
+
+
 @router.post("/trigger", response_model=SOSOut)
 def trigger_sos(data: SOSCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role in _OBSERVER_ROLES:
@@ -73,6 +86,7 @@ def trigger_sos(data: SOSCreate, current_user: User = Depends(get_current_user),
         old_alert.is_active = False
         if not old_alert.resolved_at:
             old_alert.resolved_at = datetime.utcnow()
+        _close_parent_sos_alerts(old_alert.id, db)
     
     alert = SOSAlert(
         user_id=current_user.id,
@@ -130,6 +144,7 @@ def resolve_sos(alert_id: int, current_user: User = Depends(get_current_user), d
         raise HTTPException(status_code=404, detail="Alert not found")
     alert.is_active = False
     alert.resolved_at = datetime.utcnow()
+    _close_parent_sos_alerts(alert.id, db)
     db.commit()
     return {"message": "SOS resolved", "alert_id": alert_id}
 
@@ -145,6 +160,7 @@ def resolve_active_sos(current_user: User = Depends(get_current_user), db: Sessi
         raise HTTPException(status_code=404, detail="No active SOS alert found")
     alert.is_active = False
     alert.resolved_at = datetime.utcnow()
+    _close_parent_sos_alerts(alert.id, db)
     db.commit()
     return {"message": "SOS resolved", "alert_id": alert.id}
 

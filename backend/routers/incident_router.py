@@ -1,6 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from sqlalchemy.orm import Session
-from database import get_db, Incident, User, IncidentStatus, IncidentType, Notification
+from database import (
+    get_db,
+    Incident,
+    User,
+    IncidentStatus,
+    IncidentType,
+    Notification,
+    FamilyLink,
+    FamilyLinkStatus,
+    FamilyAlert,
+)
 from schemas import IncidentCreate, IncidentOut, IncidentUpdate, IncidentEvidenceUploadOut
 from auth import get_current_user, require_admin
 from typing import List, Optional
@@ -29,18 +39,48 @@ def report_incident(data: IncidentCreate, current_user: User = Depends(get_curre
         **data.model_dump()
     )
     db.add(incident)
-    db.commit()
-    db.refresh(incident)
+    db.flush()
+
     # Notify admin on new incident
-    notif = Notification(
+    reporter_notif = Notification(
         user_id=current_user.id,
         title="Incident Reported",
         message=f"Your incident '{incident.title}' has been submitted and is under review.",
         notification_type="info",
         related_incident_id=incident.id,
     )
-    db.add(notif)
+    db.add(reporter_notif)
+
+    # Auto-send guardian alerts for non-anonymous reports.
+    if not incident.is_anonymous:
+        links = db.query(FamilyLink).filter(
+            FamilyLink.child_user_id == current_user.id,
+            FamilyLink.status == FamilyLinkStatus.accepted,
+        ).all()
+
+        for link in links:
+            db.add(
+                FamilyAlert(
+                    child_user_id=current_user.id,
+                    parent_user_id=link.parent_user_id,
+                    latitude=incident.latitude,
+                    longitude=incident.longitude,
+                    address=incident.location,
+                    message=f"{current_user.full_name} reported an incident: {incident.title}",
+                )
+            )
+            db.add(
+                Notification(
+                    user_id=link.parent_user_id,
+                    title="Ward Incident Alert",
+                    message=f"{current_user.full_name} has filed a new incident report: {incident.title}",
+                    notification_type="ward_incident",
+                    related_incident_id=incident.id,
+                )
+            )
+
     db.commit()
+    db.refresh(incident)
     return incident
 
 

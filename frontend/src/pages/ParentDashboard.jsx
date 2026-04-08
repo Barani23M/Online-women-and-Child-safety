@@ -180,7 +180,10 @@ export default function ParentDashboard() {
   const [pending,  setPending]  = useState([]);
   const [unread,   setUnread]   = useState(0);
   const [loading,  setLoading]  = useState(false);
-  const [soundOn,        setSoundOn]        = useState(false);
+  const [soundOn,        setSoundOn]        = useState(() => {
+    const saved = localStorage.getItem("guardian_sound_on");
+    return saved === null ? true : saved === "true";
+  });
   const [alarmOn,        setAlarmOn]        = useState(false);
   const [wardIncidents,  setWardIncidents]  = useState([]);
   const [alertFilter,    setAlertFilter]    = useState("all");
@@ -216,17 +219,18 @@ export default function ParentDashboard() {
         // Get the latest alert for notification details
         try {
           const alertsRes = await familyAPI.getAlerts();
+          const unreadSosAlerts = (alertsRes.data || []).filter((a) => !a.is_read && !!a.sos_alert_id);
           const latestAlert = alertsRes.data?.[0];
           if (latestAlert) {
-            sendSOSNotification(latestAlert.ward_name, latestAlert.address);
+            sendSOSNotification(latestAlert.child_name || "Your ward", latestAlert.address);
+          }
+
+          if (soundOn && unreadSosAlerts.length > 0) {
+            alertService.start();    // starts repeating siren + vibration every 4 s
+            setAlarmOn(true);
           }
         } catch (e) {
           console.log("Failed to fetch alert details:", e);
-        }
-
-        if (soundOn) {
-          alertService.start();    // starts repeating siren + vibration every 4 s
-          setAlarmOn(true);
         }
 
         toast("🚨 EMERGENCY! Your ward triggered SOS!", {
@@ -242,18 +246,38 @@ export default function ParentDashboard() {
         });
       }
 
+      if (alarmOn) {
+        try {
+          const alertsRes = await familyAPI.getAlerts();
+          const hasUnreadSos = (alertsRes.data || []).some((a) => !a.is_read && !!a.sos_alert_id);
+          if (!hasUnreadSos) {
+            alertService.stop();
+            setAlarmOn(false);
+          }
+        } catch {
+          if (count === 0) {
+            alertService.stop();
+            setAlarmOn(false);
+          }
+        }
+      }
+
       prevUnreadRef.current = count;
       setUnread(count);
     } catch {}
-  }, [soundOn, fetchAlerts]);
+  }, [soundOn, fetchAlerts, alarmOn]);
 
-  // Poll every 15 s
+  // Poll frequently so parent alerts appear automatically without manual refresh.
   useEffect(() => {
     setLoading(true);
     Promise.all([fetchAlerts(), fetchChildren(), fetchPending(), fetchUnread(), fetchWardIncidents()])
       .finally(() => setLoading(false));
 
-    const iv = setInterval(() => { fetchAlerts(); fetchUnread(); }, 15000);
+    const iv = setInterval(() => {
+      fetchAlerts();
+      fetchUnread();
+      fetchWardIncidents();
+    }, 5000);
     return () => { clearInterval(iv); alertService.stop(); };
   }, [fetchAlerts, fetchChildren, fetchPending, fetchUnread, fetchWardIncidents]);
 
@@ -261,6 +285,28 @@ export default function ParentDashboard() {
   useEffect(() => {
     requestNotificationPermission();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("guardian_sound_on", String(soundOn));
+  }, [soundOn]);
+
+  useEffect(() => {
+    const primeAudio = () => {
+      if (soundOn) {
+        alertService.unlock();
+      }
+      window.removeEventListener("click", primeAudio);
+      window.removeEventListener("touchstart", primeAudio);
+    };
+
+    window.addEventListener("click", primeAudio, { once: true });
+    window.addEventListener("touchstart", primeAudio, { once: true });
+
+    return () => {
+      window.removeEventListener("click", primeAudio);
+      window.removeEventListener("touchstart", primeAudio);
+    };
+  }, [soundOn]);
 
   // ── Sound controls ───────────────────────────────────────────────────────────
   const enableSound = () => {
