@@ -1,181 +1,150 @@
 # Safeguard Project Guide
 
-This document explains:
-1. How to run this project locally (backend + frontend)
-2. How to build Android APK for mobile app
+This file shows how to:
+1. Run the project locally
+2. Generate a fresh Android APK
 
-## Project Structure
+## Project Layout
 
-- backend: FastAPI server (SQLite database)
-- frontend: React web app
-- mobile: Expo React Native mobile app
+- `backend`: FastAPI API with SQLite
+- `frontend`: React web app
+- `frontend/android`: Capacitor Android project used to build the APK
 
 ## 1) Run The Project Locally
 
-### Prerequisites
+### Requirements
 
 - Windows PowerShell
 - Python 3.13+
 - Node.js 18+
 - npm
 
-### Backend Setup And Run
+### Start Backend
 
-1. Open terminal in project root.
-2. Go to backend folder:
+Run these commands from the project root:
 
-   cd backend
-
-3. Install Python packages:
-
-   c:/python313/python.exe -m pip install -r requirements.txt
-
-4. Start backend server:
-
-   c:/python313/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```powershell
+cd backend
+c:/python313/python.exe -m pip install -r requirements.txt
+c:/python313/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
 
 Backend URLs:
-- Local: http://localhost:8000
-- API docs: http://localhost:8000/docs
+- http://localhost:8000
+- http://localhost:8000/docs
 
-### Frontend Setup And Run
+### Start Frontend
 
-Open a second terminal in project root:
+Open a second terminal in the project root and run:
 
-1. Install packages:
-
-   npm --prefix frontend install
-
-2. Start frontend:
-
-   npm --prefix frontend run start
+```powershell
+npm --prefix frontend install
+npm --prefix frontend run start
+```
 
 Frontend URL:
 - http://localhost:3000
 
-### Same WiFi Testing
+### Same WiFi Access
 
-- Keep backend running with host 0.0.0.0
-- Find your system IP (WiFi IP), example: 172.16.x.x
-- Ensure frontend and mobile API base URL points to that IP with port 8000
+- Keep the backend on `0.0.0.0`
+- Use your PC IP address for mobile or another device on the same WiFi
+- Example format: `http://192.168.x.x:8000`
 
-## 2) Build Mobile APK (Android)
+## 2) Generate A New APK
 
-This repository has a separate mobile app in mobile folder.
+This workspace builds the Android APK from the Capacitor project inside `frontend/android`.
 
-There are 2 options:
+### Before Building
 
-## Option A: Cloud APK Build (Recommended) using EAS
+Make sure:
+- Android SDK is installed
+- `frontend/android/local.properties` contains your SDK path
+- Example SDK path on this machine:
 
-### Prerequisites
+```text
+sdk.dir=C:\Users\jayam\AppData\Local\Android\Sdk
+```
 
-- Expo account
-- EAS CLI installed globally
+### Build Steps
 
-Commands:
+Run these commands from the project root:
 
-1. Install EAS CLI:
+```powershell
+cd frontend
+npm install
+npm run build
+npx cap sync android
+cd android
+.\gradlew assembleDebug
+```
 
-   npm install -g eas-cli
+### APK Output
 
-2. Go to mobile folder:
+After the build finishes, the APK is created here:
 
-   cd mobile
+- `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
-3. Install dependencies:
+### Release APK
 
-   npm install
+If you need a release APK instead of a debug APK:
 
-4. Login:
+```powershell
+cd frontend/android
+.\gradlew assembleRelease
+```
 
-   eas login
+Release output:
 
-5. Build APK using preview profile (already configured in eas.json):
+- `frontend/android/app/build/outputs/apk/release/app-release.apk`
 
-   eas build -p android --profile preview
-
-6. After build completes, open the build URL from terminal and download APK.
-
-Notes:
-- eas.json already includes preview profile with buildType apk
-- production profile creates AAB, not APK
-
-## Option B: Local APK Build Using Android Gradle
-
-### Prerequisites
-
-- Android Studio
-- Android SDK + Build Tools
-- Java JDK (compatible with Expo/Gradle)
-
-Commands:
-
-1. Go to mobile folder:
-
-   cd mobile
-
-2. Install dependencies:
-
-   npm install
-
-3. Ensure native android project exists:
-
-   npx expo prebuild --platform android
-
-4. Build debug APK:
-
-   cd android
-   .\gradlew assembleDebug
-
-APK output path:
-
-- mobile/android/app/build/outputs/apk/debug/app-debug.apk
-
-For release APK:
-
-- Configure signing first in Android project
-- Then run:
-
-  .\gradlew assembleRelease
-
-Release output path:
-
-- mobile/android/app/build/outputs/apk/release/app-release.apk
-
-## Quick Start Commands (From Project Root)
+## 3) Quick Commands
 
 Backend:
 
-- c:/python313/python.exe -m uvicorn main:app --app-dir c:/Users/jayam/Downloads/Ai/backend --host 0.0.0.0 --port 8000
+```powershell
+c:/python313/python.exe -m uvicorn main:app --app-dir c:/Users/jayam/Downloads/Ai/backend --host 0.0.0.0 --port 8000
+```
 
 Frontend:
 
-- npm --prefix c:/Users/jayam/Downloads/Ai/frontend run start
+```powershell
+npm --prefix c:/Users/jayam/Downloads/Ai/frontend run start
+```
 
-Mobile APK (EAS preview):
+APK build:
 
-- cd mobile
-- eas build -p android --profile preview
+```powershell
+cd c:/Users/jayam/Downloads/Ai/frontend
+npm run build
+npx cap sync android
+cd android
+.\gradlew assembleDebug
+```
 
-## Common Issues
+## 4) Common Problems
 
 1. Port already in use
-- Stop old processes on ports 8000 or 3000, then restart.
+- Stop the old process on port 8000 or 3000, then run again.
 
-2. Mobile app cannot connect to backend
-- Backend must run on 0.0.0.0
-- Use same WiFi IP in mobile API URL
-- Allow firewall access for port 8000
+2. APK build fails with Android SDK error
+- Check `frontend/android/local.properties`
+- Confirm the `sdk.dir` path is correct
 
-3. APK not found after local build
-- Check exact output paths shown above
-- Re-run Gradle build command and watch for errors
+3. APK build fails after web changes
+- Run `npm run build` again
+- Then run `npx cap sync android`
 
-## Optional Existing Scripts
+4. Mobile app cannot reach backend
+- Use the PC IP address, not `localhost`
+- Backend must listen on `0.0.0.0`
 
-At project root, these helper scripts exist:
-- start-backend.ps1
-- start-frontend.ps1
-- start-mobile.ps1
+## 5) Existing Helper Scripts
 
-You can use them if they match your current environment settings.
+These scripts also exist in the project root:
+
+- `start-backend.ps1`
+- `start-frontend.ps1`
+- `start-mobile.ps1`
+
+Use them if they match your current setup.
