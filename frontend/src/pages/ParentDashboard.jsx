@@ -22,6 +22,32 @@ function timeAgo(dateStr) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function getDataUrlMime(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== "string") return null;
+  const m = dataUrl.match(/^data:([^;]+);base64,/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function getVideoExtFromMime(mime) {
+  if (!mime) return "webm";
+  if (mime.includes("mp4")) return "mp4";
+  if (mime.includes("ogg")) return "ogv";
+  if (mime.includes("quicktime")) return "mov";
+  return "webm";
+}
+
+function canPlayVideoMime(mime) {
+  if (!mime || typeof document === "undefined") return true;
+  const video = document.createElement("video");
+  return video.canPlayType(mime) !== "";
+}
+
+function roleLabel(role) {
+  if (role === "women") return "Women Ward";
+  if (role === "child") return "Child Ward";
+  return role ? `${role.charAt(0).toUpperCase()}${role.slice(1)} Ward` : "Ward";
+}
+
 
 // ─── Alert triggered from fetchUnread ─────────────────────────────────
 
@@ -65,6 +91,17 @@ function MapSection({ lat, lon, address }) {
 function AlertCard({ alert, onMarkRead, onDelete }) {
   // Auto-expand media for unread alerts that have a live video clip
   const [mediaOpen, setMediaOpen] = useState(!alert.is_read && !!alert.selfie_data);
+  const [liveOpen, setLiveOpen] = useState(!!alert.live_frame_data);
+
+  useEffect(() => {
+    if (alert.live_frame_data) {
+      setLiveOpen(true);
+    }
+  }, [alert.live_frame_data]);
+
+  const videoMime = getDataUrlMime(alert.selfie_data);
+  const videoExt = getVideoExtFromMime(videoMime);
+  const isVideoPlayable = canPlayVideoMime(videoMime);
 
   return (
     <div className={`rounded-2xl border-2 p-5 shadow-sm transition-all ${
@@ -108,6 +145,35 @@ function AlertCard({ alert, onMarkRead, onDelete }) {
         <MapSection lat={alert.latitude} lon={alert.longitude} address={alert.address} />
       </div>
 
+      {/* Live video transport (latest frame from child camera) */}
+      {alert.live_frame_data && (
+        <div className="mt-4">
+          <button
+            onClick={() => setLiveOpen((o) => !o)}
+            className="flex items-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-full transition mb-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            {liveOpen ? "Hide Live Transport" : "View Live Transport"}
+          </button>
+          {liveOpen && (
+            <div className="rounded-xl overflow-hidden border-2 border-emerald-300 shadow-md bg-black">
+              <img
+                src={alert.live_frame_data}
+                alt="Live SOS transport"
+                className="w-full max-h-80 object-cover"
+              />
+              <div className="bg-emerald-50 py-2 px-3 flex items-center justify-between">
+                <span className="text-xs text-emerald-700 font-medium">
+                  🔴 Live frame transport from child camera
+                </span>
+                <span className="text-xs text-emerald-500 font-semibold">
+                  {alert.live_frame_updated_at ? `Updated ${timeAgo(alert.live_frame_updated_at)}` : "Updating"}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Auto-captured live video */}
       {alert.selfie_data && (
         <div className="mt-4">
@@ -120,20 +186,27 @@ function AlertCard({ alert, onMarkRead, onDelete }) {
           </button>
           {mediaOpen && (
             <div className="rounded-xl overflow-hidden border-2 border-purple-300 shadow-md">
-              <video
-                src={alert.selfie_data}
-                className="w-full max-h-80 object-cover"
-                controls
-                playsInline
-                preload="metadata"
-              />
+              {isVideoPlayable ? (
+                <video
+                  className="w-full max-h-80 object-cover"
+                  controls
+                  playsInline
+                  preload="metadata"
+                >
+                  <source src={alert.selfie_data} type={videoMime || "video/webm"} />
+                </video>
+              ) : (
+                <div className="p-4 text-sm text-purple-700 bg-purple-50">
+                  This browser cannot play this SOS video format directly. Use download to view it.
+                </div>
+              )}
               <div className="bg-purple-50 py-2 px-3 flex items-center justify-between">
                 <span className="text-xs text-purple-700 font-medium">
-                  🎥 Auto-recorded the moment SOS was triggered
+                  🎥 Auto-recorded SOS clip ({videoMime || "video/webm"})
                 </span>
                 <a
                   href={alert.selfie_data}
-                  download={`sos-video-${alert.id}.webm`}
+                  download={`sos-video-${alert.id}.${videoExt}`}
                   className="text-xs bg-purple-600 text-white px-3 py-1
                              rounded-full hover:bg-purple-700 transition font-medium">
                   ⬇ Download
@@ -188,6 +261,11 @@ export default function ParentDashboard() {
   const [wardIncidents,  setWardIncidents]  = useState([]);
   const [alertFilter,    setAlertFilter]    = useState("all");
   const prevUnreadRef = useRef(0);
+  const alarmOnRef = useRef(false);
+
+  useEffect(() => {
+    alarmOnRef.current = alarmOn;
+  }, [alarmOn]);
 
   // ── Fetchers ─────────────────────────────────────────────────────────────────
   const fetchAlerts = useCallback(async () => {
@@ -246,11 +324,11 @@ export default function ParentDashboard() {
         });
       }
 
-      if (alarmOn) {
+      if (alarmOnRef.current) {
         try {
           const alertsRes = await familyAPI.getAlerts();
-          const hasUnreadSos = (alertsRes.data || []).some((a) => !a.is_read && !!a.sos_alert_id);
-          if (!hasUnreadSos) {
+          const hasActiveSos = (alertsRes.data || []).some((a) => !!a.sos_alert_id && !!a.sos_is_active);
+          if (!hasActiveSos) {
             alertService.stop();
             setAlarmOn(false);
           }
@@ -265,7 +343,7 @@ export default function ParentDashboard() {
       prevUnreadRef.current = count;
       setUnread(count);
     } catch {}
-  }, [soundOn, fetchAlerts, alarmOn]);
+  }, [soundOn, fetchAlerts]);
 
   // Poll frequently so parent alerts appear automatically without manual refresh.
   useEffect(() => {
@@ -277,9 +355,15 @@ export default function ParentDashboard() {
       fetchAlerts();
       fetchUnread();
       fetchWardIncidents();
-    }, 5000);
-    return () => { clearInterval(iv); alertService.stop(); };
+    }, 1500);
+    return () => { clearInterval(iv); };
   }, [fetchAlerts, fetchChildren, fetchPending, fetchUnread, fetchWardIncidents]);
+
+  useEffect(() => {
+    return () => {
+      alertService.stop();
+    };
+  }, []);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -328,7 +412,6 @@ export default function ParentDashboard() {
       const next = Math.max(0, unread - 1);
       setUnread(next);
       prevUnreadRef.current = next;
-      if (next === 0) stopAlarm();
     } catch { toast.error("Failed"); }
   };
 
@@ -338,7 +421,6 @@ export default function ParentDashboard() {
       setAlerts(prev => prev.map(a => ({ ...a, is_read: true })));
       setUnread(0);
       prevUnreadRef.current = 0;
-      stopAlarm();
       toast.success("All alerts marked as read");
     } catch { toast.error("Failed"); }
   };
@@ -683,6 +765,9 @@ export default function ParentDashboard() {
       {/* ══════════════════════ CHILDREN TAB ════════════════════════════════ */}
       {tab === "Children" && (
         <div>
+          <p className="text-sm text-gray-500 mb-4">
+            Linked women and child wards who will send alerts to this guardian.
+          </p>
           {loading ? (
             <div className="text-center py-12 text-gray-400 animate-pulse">Loading…</div>
           ) : children.length === 0 ? (
@@ -705,6 +790,16 @@ export default function ParentDashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-gray-800">{link.child_name}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${link.child_role === "women" ? "bg-pink-100 text-pink-700" : "bg-blue-100 text-blue-700"}`}>
+                        {roleLabel(link.child_role)}
+                      </span>
+                      {link.status && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-green-100 text-green-700">
+                          {String(link.status).replace(/_/g, " ")}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-500">{link.child_email}</p>
                     {link.child_phone && (
                       <a href={`tel:${link.child_phone}`}

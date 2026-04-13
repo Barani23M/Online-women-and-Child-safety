@@ -31,9 +31,11 @@ def _link_to_out(link: FamilyLink) -> dict:
         "accepted_at":    link.accepted_at,
         "parent_name":    link.parent.full_name  if link.parent else None,
         "parent_email":   link.parent.email      if link.parent else None,
+        "parent_role":    link.parent.role.value if link.parent and link.parent.role else None,
         "child_name":     link.child.full_name   if link.child  else None,
         "child_email":    link.child.email       if link.child  else None,
         "child_phone":    link.child.phone       if link.child  else None,
+        "child_role":     link.child.role.value  if link.child and link.child.role else None,
     }
 
 
@@ -47,6 +49,9 @@ def _alert_to_out(alert: FamilyAlert) -> dict:
         "longitude":       alert.longitude,
         "address":         alert.address,
         "selfie_data":     alert.selfie_data,
+        "live_frame_data":  alert.sos.live_frame_data if alert.sos else None,
+        "live_frame_updated_at": alert.sos.live_frame_updated_at if alert.sos else None,
+        "sos_is_active":    alert.sos.is_active if alert.sos else False,
         "message":         alert.message,
         "is_read":         alert.is_read,
         "created_at":      alert.created_at,

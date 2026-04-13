@@ -7,6 +7,7 @@ class EnhancedAlarmManager {
     this.ctx = null;
     this.intervalId = null;
     this.vibrateIntervalId = null;
+    this.canVibrate = false;
   }
 
   _init() {
@@ -19,6 +20,7 @@ class EnhancedAlarmManager {
   // Unlock audio context from user gesture
   unlock() {
     this._init();
+    this.canVibrate = true;
     const buf = this.ctx.createBuffer(1, 1, 22050);
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
@@ -77,6 +79,7 @@ class EnhancedAlarmManager {
     try {
       // Use browser's native Vibration API
       // Pattern tuned for urgency while remaining battery-friendly.
+      if (!this.canVibrate) return;
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         navigator.vibrate([350, 120, 350, 120, 500]);
       }

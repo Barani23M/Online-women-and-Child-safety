@@ -95,6 +95,10 @@ export const sosAPI = {
   myAlerts: () => API.get("/api/sos/my-alerts"),
   active: () => API.get("/api/sos/active"),
   checkParents: () => API.get("/api/sos/check-parents"),  // ← NEW: Check if user has linked parents
+  streamFrame: (alertId, formData) => API.post(`/api/sos/${alertId}/stream-frame`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }),
+  getStreamFrame: (alertId) => API.get(`/api/sos/${alertId}/stream-frame`),
 };
 
 // Incidents

@@ -49,6 +49,10 @@ def _run_sqlite_migrations():
         col_names = {row[1] for row in cols}
         if "selfie_data" not in col_names:
             conn.exec_driver_sql("ALTER TABLE sos_alerts ADD COLUMN selfie_data TEXT")
+        if "live_frame_data" not in col_names:
+            conn.exec_driver_sql("ALTER TABLE sos_alerts ADD COLUMN live_frame_data TEXT")
+        if "live_frame_updated_at" not in col_names:
+            conn.exec_driver_sql("ALTER TABLE sos_alerts ADD COLUMN live_frame_updated_at DATETIME")
 
         session_cols = conn.exec_driver_sql("PRAGMA table_info('counseling_sessions')").fetchall()
         session_col_names = {row[1] for row in session_cols}
@@ -182,8 +186,11 @@ class SOSAlert(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     resolved_at = Column(DateTime, nullable=True)
     selfie_data = Column(Text, nullable=True)
+    live_frame_data = Column(Text, nullable=True)
+    live_frame_updated_at = Column(DateTime, nullable=True)
     user = relationship("User", back_populates="sos_alerts")
     family_alerts = relationship("FamilyAlert", back_populates="sos", lazy="select")
+    live_frames = relationship("SOSLiveFrame", back_populates="sos", cascade="all, delete-orphan", lazy="select")
     notifications = relationship("Notification", foreign_keys="Notification.related_sos_id", lazy="select")
     
     __table_args__ = (
@@ -215,6 +222,27 @@ class Incident(Base):
         Index('idx_incident_reporter_created', 'reporter_id', 'created_at'),
         Index('idx_incident_status_created', 'status', 'created_at'),
         Index('idx_incident_type', 'incident_type'),
+    )
+
+
+class SOSLiveFrame(Base):
+    """Persist every uploaded SOS live-stream frame for audit and replay."""
+    __tablename__ = "sos_live_frames"
+    id = Column(Integer, primary_key=True, index=True)
+    sos_alert_id = Column(Integer, ForeignKey("sos_alerts.id"), nullable=False, index=True)
+    child_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    frame_number = Column(Integer, nullable=False, default=0)
+    frame_data = Column(Text, nullable=False)
+    content_type = Column(String, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    sos = relationship("SOSAlert", back_populates="live_frames", foreign_keys=[sos_alert_id])
+    child = relationship("User", foreign_keys=[child_user_id])
+
+    __table_args__ = (
+        Index('idx_sos_live_frame_alert_created', 'sos_alert_id', 'created_at'),
+        Index('idx_sos_live_frame_child_created', 'child_user_id', 'created_at'),
     )
 
 

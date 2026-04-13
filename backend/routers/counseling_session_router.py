@@ -115,6 +115,7 @@ def list_counselors(db: Session = Depends(get_db)):
             "full_name":     c.full_name,
             "email":         c.email,
             "phone":         c.phone,
+            "is_active":     c.is_active,
             "total_sessions": total,
             "active_now":    active > 0,
             "joined_at":     str(c.created_at),
@@ -411,12 +412,19 @@ async def signalling_ws(
         rooms[room_id] = {}
     rooms[room_id][user.id] = websocket
 
-    # If a counselor is joining an active room, update DB
-    if user.role in (UserRole.counselor, UserRole.admin) and session.user_id != user.id and not session.counselor_id:
-        session.counselor_id = user.id
-        session.status       = SessionStatus.active
-        session.started_at   = datetime.utcnow()
-        db.commit()
+    # If a counselor/admin joins, claim assignment when needed and move waiting sessions to active.
+    if user.role in (UserRole.counselor, UserRole.admin) and session.user_id != user.id:
+        changed = False
+        if not session.counselor_id:
+            session.counselor_id = user.id
+            changed = True
+        if session.status == SessionStatus.waiting:
+            session.status = SessionStatus.active
+            if not session.started_at:
+                session.started_at = datetime.utcnow()
+            changed = True
+        if changed:
+            db.commit()
 
     # Notify the other peer that someone joined
     await _broadcast(room_id, user.id, {"type": "peer_joined", "data": {"name": user.full_name}})

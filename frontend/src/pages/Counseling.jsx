@@ -230,7 +230,7 @@ export default function Counseling() {
     sessionsAPI.listCounselors()
       .then(r => {
         const mapped = (r.data || [])
-          .filter(c => c.is_active) // only show active counselors
+          .filter(c => c.is_active !== false) // show active counselors; tolerate older payloads
           .map((c, i) => {
             const colors = ["from-pink-500 to-rose-600","from-purple-500 to-indigo-600","from-teal-500 to-emerald-600","from-blue-500 to-cyan-600"];
             const slots  = ["9:00 AM","11:00 AM","2:00 PM","4:00 PM","6:00 PM"];

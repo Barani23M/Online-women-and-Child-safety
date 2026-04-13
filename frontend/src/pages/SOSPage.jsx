@@ -61,6 +61,12 @@ export default function SOSPage() {
           resolve(null);
           return;
         }
+        const allowedTypes = new Set(["video/mp4", "video/webm", "video/ogg"]);
+        if (!allowedTypes.has(file.type)) {
+          toast.error("Please select MP4 or WEBM video format.");
+          resolve(null);
+          return;
+        }
         const reader = new FileReader();
         reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
         reader.onerror = () => resolve(null);
@@ -110,7 +116,7 @@ export default function SOSPage() {
       }
       setCountdown(null);
 
-      const mimeOptions = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+      const mimeOptions = ["video/mp4", "video/webm;codecs=vp8,opus", "video/webm"];
       const supportedMime = mimeOptions.find((m) => MediaRecorder.isTypeSupported?.(m)) || "";
       const recorder = supportedMime ? new MediaRecorder(stream, { mimeType: supportedMime }) : new MediaRecorder(stream);
       const chunks = [];
@@ -128,7 +134,7 @@ export default function SOSPage() {
       recorder.stop();
       await stopped;
 
-      const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+      const blob = new Blob(chunks, { type: recorder.mimeType || supportedMime || "video/webm" });
       const dataUrl = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
@@ -184,9 +190,7 @@ export default function SOSPage() {
                   formData.append("frame_number", frameCount++);
                   
                   // Send frame to backend
-                  await sosAPI.post(`/sos/${sosAlertId}/stream-frame`, formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                  });
+                  await sosAPI.streamFrame(sosAlertId, formData);
                 } catch (err) {
                   console.log("Frame send skipped:", err?.response?.status);
                 }

@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from database import get_db, SOSAlert, User, UserRole, FamilyLink, FamilyLinkStatus, FamilyAlert, Notification
+from database import get_db, SOSAlert, SOSLiveFrame, User, UserRole, FamilyLink, FamilyLinkStatus, FamilyAlert, Notification
 from schemas import SOSCreate, SOSOut
 from auth import get_current_user
 from datetime import datetime, timedelta
 from typing import List, Optional
+import base64
 
 router = APIRouter(prefix="/api/sos", tags=["SOS"])
 
@@ -34,6 +35,18 @@ def _get_linked_parent_count(user_id: int, db: Session) -> int:
         FamilyLink.status == FamilyLinkStatus.accepted
     ).count()
     return count
+
+
+def _can_view_alert(current_user: User, alert: SOSAlert, db: Session) -> bool:
+    if current_user.id == alert.user_id:
+        return True
+    if current_user.role in {UserRole.admin, UserRole.counselor}:
+        return True
+    return db.query(FamilyLink).filter(
+        FamilyLink.parent_user_id == current_user.id,
+        FamilyLink.child_user_id == alert.user_id,
+        FamilyLink.status == FamilyLinkStatus.accepted,
+    ).first() is not None
 
 
 def _close_parent_sos_alerts(sos_alert_id: int, db: Session) -> None:
@@ -197,6 +210,56 @@ def my_alerts(current_user: User = Depends(get_current_user), db: Session = Depe
              .order_by(SOSAlert.created_at.desc()).all()
 
 
+@router.get("/{alert_id}/stream-frame")
+def get_stream_frame(alert_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    alert = db.query(SOSAlert).filter(SOSAlert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if not _can_view_alert(current_user, alert, db):
+        raise HTTPException(status_code=403, detail="Not allowed to view this alert")
+    return {
+        "alert_id": alert.id,
+        "live_frame_data": alert.live_frame_data,
+        "live_frame_updated_at": alert.live_frame_updated_at,
+        "is_active": alert.is_active,
+    }
+
+
+@router.get("/{alert_id}/stream-frames")
+def get_stream_frame_history(
+    alert_id: int,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    alert = db.query(SOSAlert).filter(SOSAlert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if not _can_view_alert(current_user, alert, db):
+        raise HTTPException(status_code=403, detail="Not allowed to view this alert")
+
+    safe_limit = max(1, min(limit, 500))
+    frames = db.query(SOSLiveFrame).filter(
+        SOSLiveFrame.sos_alert_id == alert_id,
+    ).order_by(SOSLiveFrame.created_at.desc()).limit(safe_limit).all()
+
+    return {
+        "alert_id": alert_id,
+        "frame_count": len(frames),
+        "frames": [
+            {
+                "id": frame.id,
+                "frame_number": frame.frame_number,
+                "frame_data": frame.frame_data,
+                "content_type": frame.content_type,
+                "size_bytes": frame.size_bytes,
+                "created_at": frame.created_at,
+            }
+            for frame in frames
+        ],
+    }
+
+
 @router.get("/active", response_model=List[SOSOut])
 def active_alerts(db: Session = Depends(get_db)):
     """Public endpoint for emergency services or admin"""
@@ -229,20 +292,38 @@ async def stream_video_frame(
     if not alert.is_active:
         raise HTTPException(status_code=400, detail="Alert is not active")
     
-    # Store frame metadata (in production, could store to cloud storage)
-    # For now, we log it for monitoring
     try:
         frame_data = await frame.read()
-        print(f"[SOS Live Stream] Alert {alert_id}: Frame {frame_number} ({len(frame_data)} bytes) received")
-        
-        # Notify linked parents about incoming frame (optional)
-        # This could trigger real-time notifications via WebSocket
+        content_type = frame.content_type or "image/jpeg"
+        encoded_frame = base64.b64encode(frame_data).decode('ascii')
+        data_uri = f"data:{content_type};base64,{encoded_frame}"
+
+        # Keep latest frame snapshot on SOS alert for fast dashboard polling.
+        alert.live_frame_data = data_uri
+        alert.live_frame_updated_at = datetime.utcnow()
+
+        # Persist every frame so complete live transport is stored in DB.
+        db.add(
+            SOSLiveFrame(
+                sos_alert_id=alert.id,
+                child_user_id=current_user.id,
+                frame_number=frame_number,
+                frame_data=data_uri,
+                content_type=content_type,
+                size_bytes=len(frame_data),
+                created_at=alert.live_frame_updated_at,
+            )
+        )
+        db.commit()
+
+        print(f"[SOS Live Stream] Alert {alert_id}: Frame {frame_number} ({len(frame_data)} bytes) stored")
         
         return {
             "status": "frame_received",
             "alert_id": alert_id,
             "frame_number": frame_number,
             "bytes_received": len(frame_data),
+            "live_frame_updated_at": alert.live_frame_updated_at.isoformat(),
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:

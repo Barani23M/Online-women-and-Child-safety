@@ -84,6 +84,8 @@ class SOSOut(BaseModel):
     created_at: datetime
     resolved_at: Optional[datetime] = None
     selfie_data: Optional[str] = None   # base64 video clip
+    live_frame_data: Optional[str] = None   # base64 JPEG frame
+    live_frame_updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -369,9 +371,11 @@ class FamilyLinkOut(BaseModel):
     accepted_at: Optional[datetime] = None
     parent_name: Optional[str] = None
     parent_email: Optional[str] = None
+    parent_role: Optional[str] = None
     child_name: Optional[str] = None
     child_email: Optional[str] = None
     child_phone: Optional[str] = None
+    child_role: Optional[str] = None
 
     class Config:
         from_attributes = True
