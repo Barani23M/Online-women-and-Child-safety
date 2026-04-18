@@ -648,6 +648,48 @@ export default function Counseling() {
             {/* ── STEP: COUNSELOR LIST ─────────────────────────────────── */}
             {bookingStep === "list" && (
               <>
+                {/* Counselor Management (if user is a counselor) */}
+                {user?.role === "counselor" && (
+                  <div className="bg-gradient-to-br from-purple-600 to-pink-600 rounded-3xl p-5 text-white shadow-xl mb-4">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <FiPhone size={18} className="text-white"/>
+                      </div>
+                      <div className="flex-1">
+                        <h2 className="font-extrabold text-base">Your Appointments</h2>
+                        <p className="text-white/70 text-xs mt-0.5">Manage appointment requests from users</p>
+                      </div>
+                    </div>
+                    <button onClick={() => navigate("/counseling/appointments")}
+                      className="w-full flex items-center justify-center gap-2 bg-white text-purple-700 font-bold py-3 rounded-xl transition active:scale-95 hover:shadow-lg">
+                      <FiCalendar size={16}/>
+                      <span>View Pending Appointments</span>
+                      <FiChevronRight size={16}/>
+                    </button>
+                  </div>
+                )}
+
+                {/* Book Structured Appointment Button */}
+                {user?.role !== "counselor" && (
+                  <div className="bg-gradient-to-br from-indigo-600 to-blue-600 rounded-3xl p-5 text-white shadow-xl mb-4">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <FiCalendar size={18} className="text-white"/>
+                      </div>
+                      <div className="flex-1">
+                        <h2 className="font-extrabold text-base">Schedule an Appointment</h2>
+                        <p className="text-white/70 text-xs mt-0.5">Book a specific time with a counselor you choose</p>
+                      </div>
+                    </div>
+                    <button onClick={() => navigate("/counseling/appointment")}
+                      className="w-full flex items-center justify-center gap-2 bg-white text-indigo-700 font-bold py-3 rounded-xl transition active:scale-95 hover:shadow-lg">
+                      <FiCheckCircle size={16}/>
+                      <span>Book Appointment</span>
+                      <FiChevronRight size={16}/>
+                    </button>
+                  </div>
+                )}
+
                 {/* Quick call banner */}
                 <div className="bg-gradient-to-br from-primary-600 to-rose-600 rounded-3xl p-5 text-white shadow-xl">
                   <div className="flex items-start gap-3 mb-4">

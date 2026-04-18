@@ -1,14 +1,14 @@
 import axios from "axios";
 
 const LOCAL_WEB_API_URL = "http://127.0.0.1:8000";
-const LOCAL_ANDROID_API_URL = "http://172.16.15.208:8000";
+const LOCAL_ANDROID_API_URL = "http://192.168.252.220:8000";
 const DEFAULT_WEB_API_URL = process.env.REACT_APP_API_BASE_URL || LOCAL_WEB_API_URL;
 const DEFAULT_ANDROID_API_URL = process.env.REACT_APP_ANDROID_API_BASE_URL || LOCAL_ANDROID_API_URL;
 
 const normalizeHttpUrl = (url) => {
   const value = (url || "").trim();
   if (!value) return null;
-  const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`;
   return withScheme.replace(/\/+$/, "");
 };
 
@@ -19,57 +19,91 @@ const normalizeWsUrl = (url) => {
     ? value
     : /^https?:\/\//i.test(value)
       ? value.replace(/^http/i, "ws")
-      : `wss://${value}`;
+      : `ws://${value}`;
   return withScheme.replace(/\/+$/, "");
 };
 
-const isNativeAndroidApp = () =>
-  typeof window !== "undefined" &&
-  (
-    !!window.Capacitor?.isNativePlatform?.() ||
-    (
-      typeof navigator !== "undefined" &&
-      /android/i.test(navigator.userAgent || "") &&
-      typeof window.location !== "undefined" &&
-      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-    )
-  );
+const isNativeAndroidApp = () => {
+  if (typeof window === "undefined") return false;
 
-export function resolveApiBaseUrl() {
-  if (process.env.REACT_APP_API_BASE_URL) {
-    return normalizeHttpUrl(process.env.REACT_APP_API_BASE_URL);
-  }
+  const platform = window.Capacitor?.getPlatform?.();
+  if (platform === "android" || platform === "ios") return true;
+  if (window.Capacitor?.isNativePlatform?.()) return true;
 
-  return isNativeAndroidApp() ? DEFAULT_ANDROID_API_URL : DEFAULT_WEB_API_URL;
+  // Capacitor WebView typically runs on localhost without CRA dev-server port.
+  const host = window.location?.hostname;
+  const port = window.location?.port;
+  const looksLikeCapacitorWebView = (host === "localhost" || host === "127.0.0.1") && port !== "3000";
+  return looksLikeCapacitorWebView;
+};
+
+export { isNativeAndroidApp };
+
+function isWebDevServer() {
+  if (typeof window === "undefined") return false;
+  const host = window.location?.hostname;
+  const port = window.location?.port;
+  return (host === "localhost" || host === "127.0.0.1") && port === "3000";
 }
 
-const IS_NATIVE_ANDROID = isNativeAndroidApp();
+export function resolveApiBaseUrl() {
+  // Hard rule: React dev server uses local web API; everything else uses Android/LAN API.
+  if (isWebDevServer()) {
+    return normalizeHttpUrl(DEFAULT_WEB_API_URL) || LOCAL_WEB_API_URL;
+  }
+  return normalizeHttpUrl(DEFAULT_ANDROID_API_URL) || LOCAL_ANDROID_API_URL;
+}
+
 const API_BASE_URL = resolveApiBaseUrl();
-const API = axios.create({ baseURL: API_BASE_URL, timeout: 6000 });
+const API = axios.create({ baseURL: API_BASE_URL, timeout: 10000 }); // Increased to 10s for mobile
 
 export function resolveWsBaseUrl() {
   if (process.env.REACT_APP_WS_BASE_URL) {
     return normalizeWsUrl(process.env.REACT_APP_WS_BASE_URL);
   }
-  if (IS_NATIVE_ANDROID) {
-    return DEFAULT_ANDROID_API_URL.replace(/^http/i, "ws");
-  }
-  return "ws://127.0.0.1:8000";
+  return resolveApiBaseUrl().replace(/^http/i, "ws");
 }
 
 API.interceptors.request.use(async (config) => {
-  if (IS_NATIVE_ANDROID) {
-    config.baseURL = DEFAULT_ANDROID_API_URL;
-  }
-
+  // Always dynamically resolve API URL based on current platform detection
+  config.baseURL = resolveApiBaseUrl();
+  const isNative = isNativeAndroidApp();
+  
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  
+  const fullUrl = `${config.baseURL}${config.url}`;
+  console.log(`📤 API Request [${isNative ? 'NATIVE' : 'WEB'}]: ${config.method?.toUpperCase()} ${fullUrl}`, {
+    isNative,
+    baseURL: config.baseURL,
+    url: config.url,
+    timeout: config.timeout
+  });
   return config;
 });
 
 API.interceptors.response.use(
-  (response) => response,
-  (error) => Promise.reject(error)
+  (response) => {
+    console.log(`✅ API Response: ${response.status} ${response.config.baseURL}${response.config.url}`);
+    return response;
+  },
+  (error) => {
+    const fullUrl = `${error.config?.baseURL}${error.config?.url}`;
+    const isNative = isNativeAndroidApp();
+    
+    console.error(`❌ API Error [${isNative ? 'NATIVE' : 'WEB'}]:`, {
+      message: error.message,
+      url: fullUrl,
+      baseURL: error.config?.baseURL,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      code: error.code,
+      timeout: error.config?.timeout
+    });
+    
+    return Promise.reject(error);
+  }
 );
 
 // Auth

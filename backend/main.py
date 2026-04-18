@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from sqlalchemy import text
 from database import Base, engine, init_db, SessionLocal
 from routers.auth_router import router as auth_router
 from routers.sos_router import router as sos_router
@@ -63,8 +64,13 @@ def root():
 def health():
     try:
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         db.close()
         return {"status": "ok", "database": "connected"}
     except Exception as e:
         return {"status": "ok", "database": "disconnected", "error": str(e)}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

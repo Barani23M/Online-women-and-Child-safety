@@ -408,3 +408,59 @@ class FamilyAlertOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ─── Counseling Appointments ──────────────────────────────────────────────
+
+class CounselingAppointmentCreate(BaseModel):
+    """User books an appointment with a specific counselor."""
+    counselor_id: int
+    scheduled_for: datetime = Field(..., description="Appointment date and time (ISO format)")
+    topic: str = Field(..., min_length=5, max_length=200, description="What will be discussed")
+    notes: Optional[str] = Field(None, max_length=1000, description="Additional notes or concerns")
+
+
+class CounselingAppointmentAction(BaseModel):
+    """Counselor accepts or rejects an appointment request."""
+    action: str = Field(..., pattern="^(accept|reject)$", description="accept or reject")
+    response_notes: Optional[str] = Field(None, max_length=500, description="Reason for rejection or acceptance message")
+
+
+class CounselingAppointmentResponse(BaseModel):
+    """Response showing appointment details."""
+    room_id: str
+    counselor_id: Optional[int] = None
+    counselor_name: Optional[str] = None
+    user_id: int
+    user_name: str
+    scheduled_for: Optional[str] = None
+    topic: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    created_at: str
+    can_start: bool = False  # True if appointment_accepted and current_time >= scheduled_for
+
+    class Config:
+        from_attributes = True
+
+
+class CounselingSessionOut(BaseModel):
+    """Full counseling session details."""
+    room_id: str
+    user_id: int
+    user_name: str
+    user_email: Optional[str] = None
+    counselor_id: Optional[int] = None
+    counselor_name: Optional[str] = None
+    status: str
+    scheduled_for: Optional[str] = None
+    topic: Optional[str] = None
+    notes: Optional[str] = None
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_mins: Optional[int] = None
+    created_at: str
+    call_type: str = "video"
+
+    class Config:
+        from_attributes = True

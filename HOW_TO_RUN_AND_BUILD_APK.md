@@ -21,12 +21,10 @@ This file shows how to:
 
 ### Start Backend
 
-Run these commands from the project root:
+Run this command from the project root:
 
 ```powershell
-cd backend
-c:/python313/python.exe -m pip install -r requirements.txt
-c:/python313/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000
+c:/python313/python.exe -m uvicorn main:app --app-dir c:/Users/jayam/Downloads/Ai/backend --host 0.0.0.0 --port 8000
 ```
 
 Backend URLs:

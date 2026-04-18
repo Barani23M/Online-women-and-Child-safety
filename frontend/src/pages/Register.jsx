@@ -86,7 +86,16 @@ export default function Register() {
   const [linkingUser, setLinkingUser] = useState(null); // Logged-in user data
 
   const getErrorMessage = (err) => {
-    const detail = err?.response?.data?.detail;
+    // Network/timeout errors
+    if (err.message === "Network Error") return "Network error - Check your internet connection";
+    if (err.code === "ECONNABORTED") return "Request timed out - Server not responding";
+    if (!err.response) {
+      console.error("No response received:", err.message);
+      return `Connection error: ${err.message || "Cannot reach server"}`;
+    }
+    
+    // HTTP error responses
+    const detail = err.response?.data?.detail;
     if (typeof detail === "string") return detail;
     if (Array.isArray(detail)) {
       return detail
@@ -96,19 +105,28 @@ export default function Register() {
     if (detail && typeof detail === "object") {
       return detail.message || JSON.stringify(detail);
     }
-    return "Registration failed";
+    
+    // Default error message with status code
+    const status = err.response?.status;
+    return `Error (${status}): ${err.response?.statusText || "Registration failed"}`;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (form.password !== form.confirm) return toast.error("Passwords do not match");
+    
+    // Frontend validation
+    if (!form.full_name.trim()) return toast.error("Full name is required");
+    if (!form.email.trim()) return toast.error("Email is required");
+    if (form.phone && form.phone.length < 10) return toast.error("Phone must be at least 10 digits");
     if (form.password.length < 6) return toast.error("Password must be at least 6 characters");
+    if (form.password !== form.confirm) return toast.error("Passwords do not match");
+    
     setLoading(true);
     try {
       const res = await authAPI.register({
-        full_name: form.full_name,
-        email: form.email,
-        phone: form.phone,
+        full_name: form.full_name.trim(),
+        email: form.email.trim().toLowerCase(),
+        phone: form.phone.trim(),
         password: form.password,
         role: selectedRole.role,
       });
@@ -118,7 +136,9 @@ export default function Register() {
       setStep(3); // Move to family linking step
       toast.success(`Welcome to SafeGuard, ${form.full_name.split(" ")[0]}! 🎉`);
     } catch (err) {
-      toast.error(getErrorMessage(err));
+      const errorMsg = getErrorMessage(err);
+      console.error("Registration error:", err, "Message:", errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

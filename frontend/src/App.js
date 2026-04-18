@@ -27,6 +27,9 @@ import ShareLocation from './pages/ShareLocation';
 import CounselingCall       from './pages/CounselingCall';
 import CounselorDashboard  from './pages/CounselorDashboard';
 import FamilyLinking       from './pages/FamilyLinking';
+import Diagnostics        from './pages/Diagnostics';
+import AppointmentBooking from './pages/AppointmentBooking';
+import CounselorAppointments from './pages/CounselorAppointments';
 
 const isNativeAndroidWebView =
   typeof navigator !== "undefined" &&
@@ -143,9 +146,12 @@ function AppContent() {
           />
           <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
           <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
+          <Route path="/diagnostics" element={<Diagnostics />} />
           <Route path="/helplines" element={<PrivateRoute><Helplines /></PrivateRoute>} />
           <Route path="/legal-resources" element={<PrivateRoute><LegalResources /></PrivateRoute>} />
           <Route path="/counseling" element={<PrivateRoute><Counseling /></PrivateRoute>} />
+          <Route path="/counseling/appointment" element={<PrivateRoute><AppointmentBooking /></PrivateRoute>} />
+          <Route path="/counseling/appointments" element={<CounselorRoute><CounselorAppointments /></CounselorRoute>} />
           <Route path="/child-safety" element={<PrivateRoute><ChildSafety /></PrivateRoute>} />
 
           <Route path="/dashboard"        element={<PrivateRoute><Dashboard /></PrivateRoute>} />

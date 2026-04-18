@@ -2,10 +2,14 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+from pathlib import Path
 import enum
 
 # Local-only database configuration
-SQLALCHEMY_DATABASE_URL = "sqlite:///./safeguard.db"
+# Keep DB path stable regardless of current working directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DB_FILE_PATH = PROJECT_ROOT / "safeguard.db"
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE_PATH.as_posix()}"
 
 CONNECT_ARGS = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
 
@@ -127,9 +131,12 @@ class FamilyLinkStatus(str, enum.Enum):
 
 class SessionStatus(str, enum.Enum):
     waiting = "waiting"
+    appointment_pending = "appointment_pending"
+    appointment_accepted = "appointment_accepted"
     active = "active"
     ended = "ended"
     cancelled = "cancelled"
+    rejected = "rejected"
 
 
 # ─── Models ──────────────────────────────────────────────────────────────

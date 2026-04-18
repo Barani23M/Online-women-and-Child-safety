@@ -22,7 +22,21 @@ export default function Login() {
       const role = res.data.user.role;
       navigate(role === "admin" ? "/admin" : role === "parent" ? "/parent-dashboard" : "/dashboard");
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Login failed");
+      // Better error handling
+      let errorMsg = "Login failed";
+      
+      if (err.message === "Network Error") {
+        errorMsg = "Network error - Check your connection";
+      } else if (err.code === "ECONNABORTED") {
+        errorMsg = "Request timed out - Server not responding";
+      } else if (!err.response) {
+        errorMsg = `Connection error: ${err.message || "Cannot reach server"}`;
+      } else {
+        errorMsg = err.response?.data?.detail || `Error (${err.response?.status}): Login failed`;
+      }
+      
+      console.error("Login error:", err, "Message:", errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }

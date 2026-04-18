@@ -26,8 +26,9 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from database import get_db, User, UserRole, CounselingSession, SessionStatus
+from database import get_db, User, UserRole, CounselingSession, SessionStatus, Notification
 from auth import get_current_user, create_access_token
+from schemas import CounselingAppointmentCreate, CounselingAppointmentAction
 from jose import JWTError, jwt
 
 SECRET_KEY = "safeguard_secret_key_change_in_production_2024"
@@ -293,16 +294,138 @@ def my_appointments(
     if current_user.role == UserRole.counselor:
         sessions = db.query(CounselingSession).filter(
             CounselingSession.counselor_id == current_user.id,
-            CounselingSession.status.in_([SessionStatus.waiting, SessionStatus.active, SessionStatus.ended, SessionStatus.cancelled]),
+            CounselingSession.status.in_([SessionStatus.waiting, SessionStatus.active, SessionStatus.ended, SessionStatus.cancelled, SessionStatus.appointment_pending, SessionStatus.appointment_accepted]),
         ).all()
     else:
         sessions = db.query(CounselingSession).filter(
             CounselingSession.user_id == current_user.id,
-            CounselingSession.status.in_([SessionStatus.waiting, SessionStatus.active, SessionStatus.ended, SessionStatus.cancelled]),
+            CounselingSession.status.in_([SessionStatus.waiting, SessionStatus.active, SessionStatus.ended, SessionStatus.cancelled, SessionStatus.appointment_pending, SessionStatus.appointment_accepted]),
         ).all()
 
     sessions.sort(key=lambda s: (s.scheduled_for or s.created_at), reverse=True)
     return [_session_to_out(s, db) for s in sessions]
+
+
+@router.post("/appointment", summary="Book a counseling appointment with a specific counselor")
+def book_appointment(
+    appointment: CounselingAppointmentCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """User books an appointment with a specific counselor."""
+    # Verify counselor exists and is active
+    counselor = db.query(User).filter(
+        User.id == appointment.counselor_id,
+        User.role == UserRole.counselor,
+        User.is_active == True,
+    ).first()
+    if not counselor:
+        raise HTTPException(status_code=404, detail="Counselor not found or unavailable")
+    
+    # Validate scheduled time is not in the past
+    if appointment.scheduled_for < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Appointment time cannot be in the past")
+    
+    # Create counseling session with appointment_pending status
+    room_id = str(uuid.uuid4())
+    session = CounselingSession(
+        room_id=room_id,
+        user_id=current_user.id,
+        counselor_id=appointment.counselor_id,
+        call_type="video",
+        status=SessionStatus.appointment_pending,
+        scheduled_for=appointment.scheduled_for,
+        topic=appointment.topic,
+        notes=appointment.notes,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    
+    # Create notification for counselor
+    notification = Notification(
+        user_id=appointment.counselor_id,
+        title=f"New Appointment Request from {current_user.full_name}",
+        message=f"{current_user.full_name} requested an appointment on {appointment.scheduled_for.strftime('%Y-%m-%d %H:%M')} about '{appointment.topic}'",
+        notification_type="appointment_request",
+    )
+    db.add(notification)
+    db.commit()
+    
+    return _session_to_out(session, db)
+
+
+@router.get("/appointments/pending", summary="Pending appointment requests for counselor")
+def pending_appointments(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Counselor views all pending appointment requests."""
+    if current_user.role != UserRole.counselor:
+        raise HTTPException(status_code=403, detail="Counselor access only")
+    
+    sessions = db.query(CounselingSession).filter(
+        CounselingSession.counselor_id == current_user.id,
+        CounselingSession.status == SessionStatus.appointment_pending,
+    ).order_by(CounselingSession.scheduled_for).all()
+    
+    return [_session_to_out(s, db) for s in sessions]
+
+
+@router.post("/{room_id}/respond", summary="Counselor accepts or rejects appointment")
+def respond_to_appointment(
+    room_id: str,
+    action_payload: CounselingAppointmentAction,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Counselor accepts or rejects a pending appointment request."""
+    session = db.query(CounselingSession).filter(
+        CounselingSession.room_id == room_id,
+        CounselingSession.status == SessionStatus.appointment_pending,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Appointment not found or already responded")
+    
+    if session.counselor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to respond to this appointment")
+    
+    action = action_payload.action.lower()
+    if action == "accept":
+        session.status = SessionStatus.appointment_accepted
+        # Create notification for user
+        notification = Notification(
+            user_id=session.user_id,
+            title=f"Appointment Accepted by {current_user.full_name}",
+            message=f"{current_user.full_name} accepted your appointment request for {session.scheduled_for.strftime('%Y-%m-%d %H:%M')}. Join the call when ready!",
+            notification_type="appointment_accepted",
+        )
+        db.add(notification)
+    
+    elif action == "reject":
+        session.status = SessionStatus.rejected
+        session.ended_at = datetime.utcnow()
+        # Create notification for user
+        notification = Notification(
+            user_id=session.user_id,
+            title=f"Appointment Declined by {current_user.full_name}",
+            message=f"{current_user.full_name} declined your appointment request. {action_payload.response_notes or 'Please try booking with another counselor.'}",
+            notification_type="appointment_rejected",
+        )
+        db.add(notification)
+    else:
+        raise HTTPException(status_code=400, detail="Action must be 'accept' or 'reject'")
+    
+    db.commit()
+    db.refresh(session)
+    
+    return {
+        "status": "success",
+        "room_id": room_id,
+        "action": action,
+        "session_status": session.status,
+        "message": f"Appointment {action}ed successfully"
+    }
 
 
 @router.get("/my", summary="Current user's counseling session history")
